@@ -1,0 +1,415 @@
+'use strict';
+
+// Proposals, the confirmation card, and committing a confirmed batch.
+// Shared by the plugin process (host fs gateway) and the agent extension
+// (confined fs), so both confirmation paths validate and write identically.
+
+const crypto = require('node:crypto');
+const { normalize, sanitize, clip } = require('./text.js');
+const {
+  MEMORY_DIR, INBOX_DIR, MAP_ID, isActive, loadCorpus, newEntryId, localDate,
+  renderEntry, setFrontmatterFields,
+} = require('./entries.js');
+const { search } = require('./search.js');
+const { t, localeOf } = require('./i18n.js');
+
+const SKIP_KEY = 'skip';
+/** Marker the card carries so the extension can recognise its own question. */
+const ASK_MARKER = /\[PM ([0-9a-f]{8}) (\d+)\/(\d+)\]/;
+
+const MAX_ITEMS = 5;
+const MAX_TITLE = 120;
+const MAX_CONTENT = 8000;
+const MAX_KEYWORDS = 12;
+const MAX_SIMILAR = 3;
+
+const BATCH_ID_RE = /^KB-[0-9a-f-]{36}$/;
+
+function batchPath(id) {
+  if (typeof id !== 'string' || !BATCH_ID_RE.test(id)) throw new Error('invalid batch id');
+  return `${INBOX_DIR}/${id}.json`;
+}
+
+const optionKey = (action, targetId) => (action === 'create' ? 'create' : `${action}:${targetId}`);
+const replayKey = (kind, title) => `${kind}\u0000${normalize(title)}`;
+
+// --- Proposal validation ---------------------------------------------------
+
+function validateItems(items) {
+  if (!Array.isArray(items) || !items.length) throw new Error('items must be a non-empty array');
+  if (items.length > MAX_ITEMS) throw new Error(`at most ${MAX_ITEMS} items per proposal`);
+  return items.map((item, index) => {
+    const kind = typeof item?.kind === 'string' ? item.kind.trim() : '';
+    if (!['lesson', 'rule', 'decision', 'procedure', 'map', 'preference'].includes(kind)) {
+      throw new Error(`items[${index}].kind must be one of: lesson, rule, decision, procedure, map, preference`);
+    }
+    const title = typeof item?.title === 'string' ? item.title.trim() : '';
+    const content = typeof item?.content === 'string' ? item.content.trim() : '';
+    if (!title) throw new Error(`items[${index}].title is required`);
+    if (!content) throw new Error(`items[${index}].content is required`);
+    if (title.length > MAX_TITLE) throw new Error(`items[${index}].title exceeds ${MAX_TITLE} characters`);
+    if (content.length > MAX_CONTENT) throw new Error(`items[${index}].content exceeds ${MAX_CONTENT} characters`);
+    const keywords = (Array.isArray(item?.keywords) ? item.keywords : [])
+      .filter(k => typeof k === 'string' && k.trim())
+      .map(k => k.trim())
+      .slice(0, MAX_KEYWORDS);
+    return { kind, title, content, keywords, pin: item?.pin === true };
+  });
+}
+
+/** Same kind only: replacing a lesson with a procedure is never the intent. */
+function findSimilar(entries, item, limit = MAX_SIMILAR) {
+  const exact = entries.filter(entry =>
+    isActive(entry) && entry.kind === item.kind && normalize(entry.title) === normalize(item.title));
+  const query = `${item.title} ${item.keywords.join(' ')}`;
+  const ranked = search(entries, query, { kind: item.kind, limit: limit + exact.length })
+    .map(hit => hit.entry)
+    .filter(entry => !exact.includes(entry));
+  return [...exact, ...ranked].slice(0, limit);
+}
+
+// --- Decisions -------------------------------------------------------------
+
+function optionsFor(item, similar) {
+  if (item.kind === 'map') {
+    const existing = similar.find(entry => entry.kind === 'map');
+    return existing ? [{ action: 'replace', targetId: existing.id, labelKey: 'mapUpdate' }] : [];
+  }
+  const options = [{ action: 'create', targetId: null, labelKey: 'create' }];
+  for (const entry of similar) {
+    options.push({ action: 'replace', targetId: entry.id, labelKey: 'replace' });
+    options.push({ action: 'duplicate', targetId: entry.id, labelKey: 'duplicate' });
+    options.push({ action: 'conflict', targetId: entry.id, labelKey: 'conflict' });
+  }
+  return options;
+}
+
+/** Local heuristic dedup. No network: this is where the original called Jev. */
+function heuristicDecision(item, similar) {
+  const sameBody = similar.find(entry => normalize(entry.body) === normalize(item.content));
+  if (sameBody) return { action: 'duplicate', targetId: sameBody.id, source: 'heuristic' };
+  const sameTitle = similar.find(entry => normalize(entry.title) === normalize(item.title));
+  if (sameTitle) return { action: 'replace', targetId: sameTitle.id, source: 'heuristic' };
+  if (item.kind === 'map') {
+    const existing = similar.find(entry => entry.kind === 'map');
+    if (existing) return { action: 'replace', targetId: existing.id, source: 'heuristic' };
+    return { action: 'create', targetId: null, source: 'no-similar' };
+  }
+  return { action: 'create', targetId: null, source: similar.length ? 'heuristic' : 'no-similar' };
+}
+
+function decisionNote(batch, item) {
+  const decision = item.decision;
+  const option = item.options.find(o => o.key === optionKey(decision.action, decision.targetId));
+  if (decision.action === 'duplicate') return t(batch.locale, 'noteDuplicate');
+  if (decision.action === 'replace' && decision.targetId) {
+    return item.kind === 'map'
+      ? t(batch.locale, 'noteMap')
+      : t(batch.locale, 'noteReplace', decision.targetId);
+  }
+  if (decision.source === 'no-similar') return t(batch.locale, 'noteNew');
+  return t(batch.locale, 'noteSimilar', item.similar.length);
+}
+
+// --- Batch construction ----------------------------------------------------
+
+/** Recommended action first, then the alternatives for the focus target, then "do not save". */
+function askOptions(batch, item) {
+  const recommended = optionKey(item.decision.action, item.decision.targetId);
+  const focus = item.decision.targetId ?? item.similar[0]?.id ?? null;
+  const keys = [recommended];
+  if (item.kind !== 'map') {
+    keys.push('create');
+    if (focus) keys.push(`replace:${focus}`, `conflict:${focus}`, `duplicate:${focus}`);
+  }
+  const offered = [...new Set(keys)].filter(key => item.options.some(o => o.key === key));
+  const choices = offered.map(key => {
+    const option = item.options.find(o => o.key === key);
+    return {
+      key,
+      label: key === recommended ? t(batch.locale, 'recommended', option.label) : option.label,
+    };
+  });
+  choices.push({ key: SKIP_KEY, label: t(batch.locale, 'skip') });
+  return choices;
+}
+
+function buildBatch({ prepared, sessionId, locale, id = `KB-${crypto.randomUUID()}`, createdAt = new Date().toISOString() }) {
+  const language = localeOf(locale);
+  const batch = {
+    schema: 'memory-inbox/1',
+    id,
+    ref: id.slice(3, 11),
+    createdAt,
+    locale: language,
+    sessionId: sessionId ?? null,
+    items: prepared.map(({ item, similar }) => {
+      const decision = heuristicDecision(item, similar);
+      const options = optionsFor(item, similar).map(option => ({
+        key: optionKey(option.action, option.targetId),
+        action: option.action,
+        targetId: option.targetId,
+        label: t(language, option.labelKey, option.targetId),
+      }));
+      return {
+        kind: item.kind,
+        title: item.title,
+        content: item.content,
+        keywords: item.keywords,
+        pin: item.pin,
+        similar: similar.map(entry => ({
+          id: entry.id, kind: entry.kind, title: entry.title, summary: entry.summary, source: entry.source,
+        })),
+        options,
+        decision,
+      };
+    }),
+  };
+  for (const item of batch.items) {
+    item.note = decisionNote(batch, item);
+    item.ask = askOptions(batch, item);
+  }
+  return batch;
+}
+
+/** Arguments for the host `asktool`: one single-choice question per item. */
+function askToolArgs(batch) {
+  const total = batch.items.length;
+  return {
+    questions: batch.items.map((item, index) => ({
+      question: t(
+        batch.locale,
+        'question',
+        `[PM ${batch.ref} ${index + 1}/${total}]`,
+        t(batch.locale, `kind_${item.kind}`),
+        sanitize(item.title, MAX_TITLE),
+        sanitize(item.note, 160),
+        sanitize(item.content, 200),
+      ),
+      options: item.ask.map(choice => choice.label),
+    })),
+  };
+}
+
+/**
+ * Map genuine asktool answers back to selections. Only options this plugin
+ * generated count; a typed-in answer or an unanswered question saves nothing.
+ */
+function selectionsFromAnswers(batch, questions, answers) {
+  const selections = [];
+  const notes = [];
+  questions.forEach((question, index) => {
+    const marker = ASK_MARKER.exec(String(question?.question ?? ''));
+    if (!marker || marker[1] !== batch.ref) return;
+    const itemIndex = Number(marker[2]) - 1;
+    const item = batch.items[itemIndex];
+    if (!item) return;
+    const answer = answers?.[index];
+    if (!Array.isArray(answer) || !answer.length) {
+      notes.push(t(batch.locale, 'unanswered', sanitize(item.title, MAX_TITLE)));
+      return;
+    }
+    const choice = item.ask.find(candidate => candidate.label === String(answer[0]).trim());
+    if (!choice) {
+      notes.push(t(batch.locale, 'notAnOption', sanitize(item.title, MAX_TITLE), sanitize(String(answer[0]), 40)));
+      return;
+    }
+    if (choice.key === SKIP_KEY) return;
+    selections.push({ index: itemIndex, key: choice.key });
+  });
+  return { selections, notes };
+}
+
+// --- Inbox -----------------------------------------------------------------
+
+async function readBatch(io, id, locale) {
+  let raw;
+  try { raw = await io.readText(batchPath(id)); }
+  catch (error) {
+    if (isMissingLike(error)) throw new Error(t(locale, 'batchMissing'));
+    throw error;
+  }
+  let batch;
+  try { batch = JSON.parse(raw); }
+  catch { throw new Error(t(locale, 'batchMissing')); }
+  if (batch?.schema !== 'memory-inbox/1' || batch.id !== id || !Array.isArray(batch.items)) {
+    throw new Error(t(locale, 'batchMissing'));
+  }
+  return batch;
+}
+
+const isMissingLike = error =>
+  ['ENOENT', 'ENOTDIR', 'NOT_FOUND'].includes(error?.code) || /not found/i.test(String(error?.message ?? ''));
+
+async function listBatches(io) {
+  let files;
+  try { files = await io.reader.list(INBOX_DIR); }
+  catch (error) { if (isMissingLike(error)) return []; throw error; }
+  const batches = [];
+  for (const file of files) {
+    const match = /^(KB-[0-9a-f-]{36})\.json$/.exec(file.name);
+    if (file.isDirectory || !match) continue;
+    try {
+      const batch = await readBatch(io, match[1], 'en');
+      if (batch.status !== 'done') batches.push(batch);
+    } catch { /* a malformed batch is skipped, not fatal for the list */ }
+  }
+  return batches.sort((a, b) => String(a.createdAt) < String(b.createdAt) ? -1 : String(a.createdAt) > String(b.createdAt) ? 1 : 0);
+}
+
+/**
+ * A handled batch is deleted when the io layer can delete, and marked `done`
+ * when it cannot (the plugin process has no fs.delete permission, so its
+ * `remove` always throws by design).
+ */
+async function retireBatch(io, batch, result) {
+  try {
+    await io.remove(batchPath(batch.id));
+  } catch {
+    try {
+      await io.writeText(batchPath(batch.id), JSON.stringify({ ...batch, status: 'done', result }, null, 2));
+    } catch { /* nothing else to do; the batch simply stays pending */ }
+  }
+}
+
+// --- Commit ----------------------------------------------------------------
+
+/**
+ * Validate every selection first; write only when the whole commit is valid.
+ * Unselected items are skipped.
+ *
+ * Idempotency does not depend on the inbox write succeeding: every entry this
+ * batch wrote carries `batchRef`, so a retry finds what already landed and
+ * adopts it instead of writing a second copy.
+ */
+async function commitBatch(io, batch, selections, options = {}) {
+  const date = options.date ?? localDate();
+  const locale = batch.locale;
+  if (!Array.isArray(selections)) throw new Error('selections must be an array');
+
+  const entries = await loadCorpus(io.reader);
+  const byId = new Map(entries.map(entry => [entry.id, entry]));
+  const landed = new Map();
+  for (const entry of entries) {
+    if (entry.batchRef === batch.ref) landed.set(replayKey(entry.kind, entry.title), entry);
+  }
+
+  const plan = [];
+  const seen = new Set();
+  for (const selection of selections) {
+    const item = batch.items[selection?.index];
+    if (!item || seen.has(selection.index)) throw new Error('invalid selection');
+    seen.add(selection.index);
+    if (item.savedAs) continue;
+    const option = item.options.find(candidate => candidate.key === selection.key);
+    if (!option) throw new Error(t(locale, 'invalidAction', sanitize(item.title, MAX_TITLE)));
+    if (option.action === 'duplicate') continue;
+    let target = null;
+    if (option.targetId) {
+      target = byId.get(option.targetId);
+      if (!target || !isActive(target)) {
+        throw new Error(t(locale, 'targetGone', sanitize(item.title, MAX_TITLE), option.targetId));
+      }
+      if (option.action === 'replace' && target.kind !== item.kind) {
+        throw new Error(t(locale, 'kindMismatch', target.id));
+      }
+      if (option.action === 'replace'
+        && plan.some(entry => entry.option.action === 'replace' && entry.target.id === target.id)) {
+        throw new Error(t(locale, 'oneReplacement', target.id));
+      }
+    }
+    plan.push({ item, option, target });
+  }
+
+  const taken = new Set(entries.map(entry => entry.id));
+  const saved = [];
+  const warnings = [];
+  try {
+    for (const { item, option, target } of plan) {
+      const replay = landed.get(replayKey(item.kind, item.title));
+      if (replay) {
+        item.savedAs = replay.id;
+        saved.push({
+          id: replay.id, kind: item.kind, title: item.title,
+          source: replay.source, action: option.action, targetId: option.targetId,
+        });
+        continue;
+      }
+      const id = newEntryId(item.kind, item.title, date, taken);
+      taken.add(id);
+      const source = `${MEMORY_DIR}/${id}.md`;
+      await io.writeText(source, renderEntry({
+        id,
+        kind: item.kind,
+        title: item.title,
+        keywords: item.keywords,
+        content: item.content,
+        created: date,
+        pinned: item.pin,
+        batchRef: batch.ref,
+        supersedes: option.action === 'replace' ? target.id : null,
+        related: option.action === 'conflict' ? [target.id] : [],
+      }));
+      item.savedAs = id;
+      saved.push({ id, kind: item.kind, title: item.title, source, action: option.action, targetId: option.targetId });
+
+      // The new entry is already safe on disk; a failed back-link is reported, not rolled back.
+      // The map is a singleton: replacing it overwrites the same file, so there
+      // is no old entry to retire.
+      if (item.kind !== 'map' && target && (option.action === 'replace' || option.action === 'conflict')) {
+        try {
+          const raw = await io.readText(target.source);
+          const fields = option.action === 'replace'
+            ? { status: 'deprecated', supersededBy: id }
+            : { related: [...new Set([...target.related, id])] };
+          await io.writeText(target.source, setFrontmatterFields(raw, fields));
+        } catch (error) {
+          warnings.push(t(locale, 'backlinkFailed', id, target.id, String(error?.message ?? error)));
+        }
+      }
+    }
+  } catch (error) {
+    if (saved.length) {
+      // Best effort only. The batchRef scan above is what makes the retry safe,
+      // so a write-back failure here is reported inside the thrown message
+      // rather than swallowed.
+      let writeBack = '';
+      try {
+        await io.writeText(batchPath(batch.id), JSON.stringify(batch, null, 2));
+      } catch (writeError) {
+        writeBack = ` ${t(locale, 'inboxWriteFailed', String(writeError?.message ?? writeError))}`;
+      }
+      throw new Error(
+        t(locale, 'partialFailure', saved.map(entry => entry.id).join(', '), String(error?.message ?? error)) + writeBack,
+      );
+    }
+    throw error;
+  }
+
+  const result = {
+    saved,
+    skipped: batch.items.filter(item => !item.savedAs).length,
+    warnings,
+  };
+  await retireBatch(io, batch, result);
+  return result;
+}
+
+function describeResult(result, locale) {
+  const lines = result.saved.map(entry =>
+    entry.action === 'replace'
+      ? t(locale, 'savedReplace', entry.id, entry.targetId)
+      : entry.action === 'conflict'
+        ? t(locale, 'savedConflict', entry.id, entry.targetId)
+        : t(locale, 'saved', entry.id, entry.kind, clip(entry.title, 80)));
+  if (result.skipped) lines.push(t(locale, 'notSaved', result.skipped));
+  return [...lines, ...result.warnings];
+}
+
+module.exports = {
+  SKIP_KEY, ASK_MARKER, MAX_ITEMS, MAX_TITLE, MAX_CONTENT, MAX_KEYWORDS,
+  batchPath, optionKey, replayKey, validateItems, findSimilar, optionsFor,
+  heuristicDecision, decisionNote, askOptions, buildBatch, askToolArgs,
+  selectionsFromAnswers, readBatch, listBatches, retireBatch, commitBatch, describeResult,
+  MAP_ID,
+};

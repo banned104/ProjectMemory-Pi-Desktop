@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Review memory proposals</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #1f2328; --muted: #6a737d; --border: #d9dcdf;
+    --accent: #2f6fdb; --accent-text: #ffffff; --warn: #9a6700; --warn-bg: #fff8e1;
+    --ok: #1a7f37; --ok-bg: #e9f7ee; --danger: #cf222e; --chip: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17191c; --surface: #1f2226; --text: #e6e8eb; --muted: #9aa4ae; --border: #33383e;
+      --accent: #5b93f0; --accent-text: #0d1117; --warn: #e3b341; --warn-bg: #2d2610;
+      --ok: #56d364; --ok-bg: #12261a; --danger: #ff7b72; --chip: #2a2f35;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+  main { padding: 12px 16px 88px; max-width: 880px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  h1 { font-size: 17px; margin: 0; }
+  .muted { color: var(--muted); font-size: 12.5px; }
+  button { font: inherit; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .55; cursor: default; }
+  .batch { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+  .batch-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .item { border-top: 1px solid var(--border); padding: 10px 0; }
+  .item:first-of-type { border-top: 0; }
+  .item-head { display: flex; gap: 10px; align-items: flex-start; }
+  .item-head input[type=checkbox] { margin-top: 4px; width: 16px; height: 16px; flex: none; }
+  .title { font-weight: 600; }
+  .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px;
+    background: var(--chip); color: var(--muted); margin: 3px 4px 0 0; }
+  .badge.kind { background: var(--ok-bg); color: var(--ok); }
+  select { font: inherit; margin-top: 6px; max-width: 100%; padding: 4px 6px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+  details { margin-top: 6px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  pre { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; margin: 6px 0 0; }
+  .chips span { display: inline-block; background: var(--chip); border-radius: 4px; padding: 0 6px; margin: 2px 4px 0 0; font-size: 12px; }
+  .similar { font-size: 12.5px; margin: 6px 0 0; padding-left: 18px; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+  .empty { text-align: center; color: var(--muted); padding: 48px 0; }
+  .result { background: var(--ok-bg); color: var(--ok); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
+  .error { background: var(--warn-bg); color: var(--danger); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1 data-i18n="title"></h1>
+      <div class="muted" id="project"></div>
+    </div>
+    <button id="refresh" data-i18n="refresh"></button>
+  </header>
+  <div id="message"></div>
+  <div id="list"></div>
+</main>
+<script>
+  const bridge = window.pluginBridge;
+  // The panel follows the app language: Chinese locales read zh-CN, everything else English.
+  const TEXT = {
+    'zh-CN': {
+      title: '确认记忆沉淀', refresh: '刷新', loading: '加载中…',
+      project: n => `项目：${n}`, noProject: '没有打开的项目', empty: '没有待确认的记忆。',
+      keep: '保存这一条', savedAs: id => `已保存为 ${id}`,
+      expand: n => `展开内容${n ? `与 ${n} 条相似条目` : ''}`,
+      batch: n => `建议沉淀 ${n} 条`, discard: '全部跳过', commit: '保存所选',
+      saved: (id, title) => `已保存 <b>${id}</b> ${title}`,
+      skipped: n => `跳过 ${n} 条`, nothing: '没有保存任何条目',
+      discarded: '已全部跳过，未写入任何记忆。',
+      kinds: { lesson: '经验', rule: '规则', decision: '决策', procedure: '步骤', map: '项目地图', preference: '偏好' },
+    },
+    en: {
+      title: 'Review memory proposals', refresh: 'Refresh', loading: 'Loading…',
+      project: n => `Project: ${n}`, noProject: 'No project is open', empty: 'Nothing is waiting for review.',
+      keep: 'Save this item', savedAs: id => `Saved as ${id}`,
+      expand: n => `Show content${n ? ` and ${n} similar entr${n === 1 ? 'y' : 'ies'}` : ''}`,
+      batch: n => `${n} proposed item${n === 1 ? '' : 's'}`, discard: 'Skip all', commit: 'Save selected',
+      saved: (id, title) => `Saved <b>${id}</b> ${title}`,
+      skipped: n => `${n} skipped`, nothing: 'Nothing was saved',
+      discarded: 'Skipped all; nothing was written.',
+      kinds: { lesson: 'lesson', rule: 'rule', decision: 'decision', procedure: 'howto', map: 'map', preference: 'pref' },
+    },
+  };
+
+  let L = TEXT.en;
+  const tr = (key, ...args) => (typeof L[key] === 'function' ? L[key](...args) : L[key]);
+  const kindLabel = kind => L.kinds[kind] || kind;
+
+  function applyLocale(locale) {
+    L = /^zh/i.test(String(locale || '')) ? TEXT['zh-CN'] : TEXT.en;
+    document.documentElement.lang = L === TEXT.en ? 'en' : 'zh-CN';
+    document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = tr(el.dataset.i18n); });
+  }
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const keyOf = d => (d.action === 'create' ? 'create' : `${d.action}:${d.targetId}`);
+  let busy = false;
+
+  function renderItem(item, index) {
+    if (item.savedAs) {
+      return `<div class="item"><div class="title">${esc(item.title)}</div><span class="badge kind">${esc(tr('savedAs', item.savedAs))}</span></div>`;
+    }
+    const selected = keyOf(item.decision);
+    const options = item.options
+      .map(o => `<option value="${esc(o.key)}" ${o.key === selected ? 'selected' : ''}>${esc(o.label)}</option>`)
+      .join('');
+    const similar = item.similar.length
+      ? `<ul class="similar">${item.similar.map(s =>
+        `<li><b>${esc(s.id)}</b> ${esc(s.title)} — <span class="muted">${esc(s.summary)}</span></li>`).join('')}</ul>`
+      : '';
+    return `<div class="item">
+      <div class="item-head">
+        <input type="checkbox" data-index="${index}" ${item.decision.action === 'duplicate' ? '' : 'checked'} aria-label="${esc(tr('keep'))}" />
+        <div style="min-width:0;flex:1">
+          <div class="title">${esc(item.title)}</div>
+          <span class="badge kind">${esc(kindLabel(item.kind))}</span>
+          <span class="badge">${esc(item.note || '')}</span>
+          ${item.pin ? '<span class="badge kind">pinned</span>' : ''}
+          <div><select data-index="${index}">${options}</select></div>
+          <details><summary>${esc(tr('expand', item.similar.length))}</summary>
+            <pre>${esc(item.content)}</pre>
+            <div class="chips">${item.keywords.map(k => `<span>${esc(k)}</span>`).join('')}</div>
+            ${similar}
+          </details>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function renderBatch(batch) {
+    const when = new Date(batch.createdAt).toLocaleString();
+    return `<section class="batch" data-batch="${esc(batch.id)}">
+      <div class="batch-head"><b>${esc(tr('batch', batch.items.length))}</b><span class="muted">${esc(when)}</span></div>
+      ${batch.items.map(renderItem).join('')}
+      <div class="actions">
+        <button data-discard="${esc(batch.id)}">${esc(tr('discard'))}</button>
+        <button class="primary" data-commit="${esc(batch.id)}">${esc(tr('commit'))}</button>
+      </div>
+    </section>`;
+  }
+
+  function show(kind, html) { $('message').innerHTML = html ? `<div class="${kind}">${html}</div>` : ''; }
+
+  async function load() {
+    try {
+      const { project, batches } = await bridge.invoke('inbox.list', {});
+      $('project').textContent = project ? tr('project', project.name) : tr('noProject');
+      $('list').innerHTML = batches.length
+        ? batches.map(renderBatch).join('')
+        : `<div class="empty">${esc(tr('empty'))}</div>`;
+    } catch (error) {
+      $('list').innerHTML = '';
+      show('error', esc(error.message || error));
+    }
+  }
+
+  async function act(run) {
+    if (busy) return;
+    busy = true;
+    document.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    try { await run(); }
+    catch (error) { show('error', esc(error.message || error)); }
+    finally {
+      busy = false;
+      document.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      await load();
+    }
+  }
+
+  document.addEventListener('click', event => {
+    const commitId = event.target.getAttribute?.('data-commit');
+    const discardId = event.target.getAttribute?.('data-discard');
+    if (commitId) {
+      const section = event.target.closest('section');
+      const selections = [...section.querySelectorAll('input[type=checkbox]')]
+        .filter(box => box.checked)
+        .map(box => ({
+          index: Number(box.dataset.index),
+          key: section.querySelector(`select[data-index="${box.dataset.index}"]`).value,
+        }));
+      act(async () => {
+        const result = await bridge.invoke('inbox.commit', { batchId: commitId, selections });
+        const lines = result.saved.map(s => tr('saved', esc(s.id), esc(s.title)));
+        if (result.skipped) lines.push(esc(tr('skipped', result.skipped)));
+        show('result', lines.concat(result.warnings.map(esc)).join('<br>') || esc(tr('nothing')));
+      });
+    } else if (discardId) {
+      act(async () => {
+        await bridge.invoke('inbox.discard', { batchId: discardId });
+        show('result', esc(tr('discarded')));
+      });
+    } else if (event.target.id === 'refresh') {
+      show('', '');
+      load();
+    }
+  });
+
+  window.addEventListener('focus', () => { if (!busy) load(); });
+
+  (async () => {
+    applyLocale('en');
+    $('list').innerHTML = `<div class="empty">${esc(tr('loading'))}</div>`;
+    try { applyLocale((await bridge.invoke('app.getAppearance', {}))?.locale); } catch { /* keep English */ }
+    load();
+  })();
+</script>
+</body>
+</html>

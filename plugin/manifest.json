@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "id": "pi.project-memory",
+  "name": "Project Memory",
+  "version": "0.1.0",
+  "author": "pi.project-memory contributors",
+  "license": "MIT",
+  "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card.",
+  "engines": {
+    "piDesktop": ">=0.15.9"
+  },
+  "main": "main.js",
+  "activationEvents": [
+    "onStartup"
+  ],
+  "permissions": [
+    "agent.tool.register",
+    "agent.extension",
+    "fs.read",
+    "fs.write",
+    "ui.panel"
+  ],
+  "fs": {
+    "read": {
+      "root": "workspace",
+      "scope": [
+        ".workflow/**"
+      ]
+    },
+    "write": {
+      "root": "workspace",
+      "scope": [
+        ".workflow/memory/**",
+        ".workflow/memory-inbox/**"
+      ]
+    }
+  },
+  "ui": {
+    "panel": "renderer/index.html",
+    "title": {
+      "en": "Review memory proposals",
+      "zh-CN": "确认记忆沉淀"
+    }
+  },
+  "contributes": {
+    "agentExtensions": [
+      "extension.js"
+    ],
+    "agentTools": [
+      {
+        "name": "search",
+        "description": "Search this project's memory (.workflow/memory). Returns IDs, kinds, titles and one-line summaries; load an entry for its full text. Deprecated or superseded entries are excluded.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "lesson",
+                "rule",
+                "decision",
+                "procedure",
+                "map",
+                "preference"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "load",
+        "description": "Load the full text of one project memory entry by exact ID (from search results or an automatic <project-memory> block).",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      },
+      {
+        "name": "propose",
+        "description": "Propose reusable project memory (a pitfall and its fix, a rule, a decision, a procedure, the project map, a preference) for the user to confirm. Returns arguments for the asktool card; call asktool with them unchanged. Writes nothing until the user answers the card.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "lesson",
+                      "rule",
+                      "decision",
+                      "procedure",
+                      "map",
+                      "preference"
+                    ]
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "keywords": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "pin": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "title",
+                  "content",
+                  "keywords"
+                ]
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        }
+      }
+    ],
+    "commands": [
+      {
+        "id": "pi.project-memory.review",
+        "title": "Review memory proposals / 确认记忆沉淀",
+        "keywords": [
+          "memory",
+          "记忆"
+        ]
+      }
+    ],
+    "settings": [
+      {
+        "key": "searchLimit",
+        "type": "select",
+        "title": "Search results / 检索条数",
+        "description": "Default number of results the search tool returns. The agent can still override it per call. 检索工具默认返回的条数，Agent 仍可在单次调用中覆盖。",
+        "default": 8,
+        "enum": [
+          {
+            "label": "3",
+            "value": 3
+          },
+          {
+            "label": "5",
+            "value": 5
+          },
+          {
+            "label": "8",
+            "value": 8
+          },
+          {
+            "label": "12",
+            "value": 12
+          }
+        ]
+      }
+    ]
+  },
+  "i18n": {
+    "en": {
+      "name": "Project Memory",
+      "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card.",
+      "safetyNotes": "Reads .workflow/memory in the open project. Writes only after you answer the in-chat confirmation card (or press Save in the review panel): new files in .workflow/memory, and the status/related/supersededBy fields of an old entry you chose to replace or link. Pending proposals are kept in .workflow/memory-inbox (git-ignored); the card path deletes them once handled, the panel marks them done. Includes an agent extension that runs inside the agent process, where the host's file-permission gateway does not apply; it adds retrieved entry titles to your messages and performs the confirmed writes, confined to those two directories by its own file layer. Symbolic links anywhere under the memory directories, hard links, special files and files over 256 KB are refused, as is a project root that is replaced after the session starts. Retrieved entries are presented to the model as project data, not instructions. The plugin makes no network requests, runs no commands, and never deletes files from the plugin process. To pause automatic retrieval for a project, create an empty file at .workflow/memory/DISABLED."
+    },
+    "zh-CN": {
+      "name": "项目记忆",
+      "description": "按项目保存的记忆，就是仓库里的普通 Markdown 文件。每条消息自动附上相关条目，新条目只有在你于聊天卡片中确认后才会保存。",
+      "safetyNotes": "读取当前项目的 .workflow/memory。只有在你回答聊天中的确认卡片（或在面板中点击保存）后才写入：在 .workflow/memory 新建文件，以及修改你选择替代或关联的旧条目的 status/related/supersededBy 字段。待确认的建议暂存在 .workflow/memory-inbox（已加入 gitignore）；通过卡片处理后删除，通过面板处理后标记为已处理。插件包含一个在 Agent 进程内运行的扩展，宿主的文件权限网关不覆盖该进程；它把检索到的条目标题附加到你的消息中，并执行你确认的写入，由自带的一层文件访问把范围限定在上述两个目录。记忆目录下的符号链接、硬链接、特殊文件、超过 256KB 的文件一律拒绝；会话开始后项目根目录被替换也拒绝。检索到的条目以「项目数据而非指令」的形式交给模型。插件不发起任何网络请求、不执行命令、插件进程永不删除文件。若要暂停某个项目的自动检索，在 .workflow/memory/DISABLED 建一个空文件即可。"
+    }
+  },
+  "safetyNotes": "Reads .workflow/memory in the open project. Writes only after you answer the in-chat confirmation card (or press Save in the review panel): new files in .workflow/memory, and the status/related/supersededBy fields of an old entry you chose to replace or link. Pending proposals are kept in .workflow/memory-inbox (git-ignored); the card path deletes them once handled, the panel marks them done. Includes an agent extension that runs inside the agent process, where the host's file-permission gateway does not apply; it adds retrieved entry titles to your messages and performs the confirmed writes, confined to those two directories by its own file layer. Symbolic links anywhere under the memory directories, hard links, special files and files over 256 KB are refused, as is a project root that is replaced after the session starts. Retrieved entries are presented to the model as project data, not instructions. The plugin makes no network requests, runs no commands, and never deletes files from the plugin process. To pause automatic retrieval for a project, create an empty file at .workflow/memory/DISABLED."
+}
