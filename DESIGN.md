@@ -88,6 +88,13 @@ Retrieved for this message:
 - 每行格式 `[标签] ID | 标题 — 摘要`，标签直接告诉模型这是什么类型的知识。
 - 按消息哈希缓存 → 多轮之间 payload 逐字节稳定，**不破坏 prompt cache**。
 
+### 一个需要知道的前提
+
+缓存键是**提示词文本**本身，因此依赖宿主每次从自己的会话历史重建 payload，而不是把钩子返回的
+payload 回灌。若这个前提不成立，键会全部落空：`pinned` 条目会在每一轮重复附加（多花 token，
+不是正确性问题），而不是只附一次。已由 `test/extension.test.js` 固定该行为，并在
+`extension.js` 的 `turnKeys` 处注明。
+
 ---
 
 ## 5. 工具

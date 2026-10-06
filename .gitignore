@@ -1,9 +1,11 @@
 # Build / test artifacts
 node_modules/
-dist/
 *.log
 .DS_Store
 Thumbs.db
 
 # Local scratch
 .tmp/
+
+# NOTE: dist/ is intentionally NOT ignored — the .piplug is the deliverable.
+# (The packaging tool excludes a plugin's own dist/ from the package itself.)

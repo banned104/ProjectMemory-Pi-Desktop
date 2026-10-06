@@ -1,0 +1,5 @@
+# Keep the working tree on LF so the packaged bytes are reproducible.
+* text=auto eol=lf
+
+# The plugin package is a zip archive; never touch its bytes.
+*.piplug binary
