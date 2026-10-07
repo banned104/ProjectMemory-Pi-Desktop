@@ -560,3 +560,30 @@ test('a commit that saves nothing reports it, undecided or decided', async () =>
   assert.equal(duplicate.skipped, 1);
   assert.match(core.describeResult(duplicate, 'en').join('\n'), /Nothing was saved/);
 });
+
+test('a batch that has been handled is neither readable nor listed again', async () => {
+  const io = memoryIo({});
+  const batch = makeBatch([{ item: makeItem(), similar: [] }]);
+  const write = status => io.writeText(
+    core.batchPath(batch.id),
+    JSON.stringify(status ? { ...batch, status } : batch),
+  );
+
+  // A pending batch is readable and listed.
+  await write(null);
+  assert.equal((await core.readBatch(io, batch.id, 'en')).id, batch.id);
+  assert.equal((await core.listBatches(io)).length, 1);
+
+  // `done` is what the plugin process writes when it cannot delete the file;
+  // any other non-"pending" status is not actionable either. Both mutating
+  // entry points (`inbox.commit` and `inbox.discard`) go through readBatch.
+  for (const status of ['done', 'resolved']) {
+    await write(status);
+    await assert.rejects(
+      () => core.readBatch(io, batch.id, 'en'),
+      /does not exist or was already handled/,
+      `readBatch must refuse status=${status}`,
+    );
+    assert.deepEqual(await core.listBatches(io), [], `listBatches must hide status=${status}`);
+  }
+});

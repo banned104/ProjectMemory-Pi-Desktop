@@ -234,7 +234,12 @@ async function readBatch(io, id, locale) {
   let batch;
   try { batch = JSON.parse(raw); }
   catch { throw new Error(t(locale, 'batchMissing')); }
-  if (batch?.schema !== 'memory-inbox/1' || batch.id !== id || !Array.isArray(batch.items)) {
+  // A batch that has been handled is not a pending batch any more. Without
+  // this the panel can commit it again: `batchRef` idempotency then only holds
+  // as long as no entry file was deleted in between.
+  const status = typeof batch?.status === 'string' ? batch.status.trim() : '';
+  if (batch?.schema !== 'memory-inbox/1' || batch.id !== id || !Array.isArray(batch.items)
+    || (status && status !== 'pending')) {
     throw new Error(t(locale, 'batchMissing'));
   }
   return batch;
@@ -252,8 +257,7 @@ async function listBatches(io) {
     const match = /^(KB-[0-9a-f-]{36})\.json$/.exec(file.name);
     if (file.isDirectory || !match) continue;
     try {
-      const batch = await readBatch(io, match[1], 'en');
-      if (batch.status !== 'done') batches.push(batch);
+      batches.push(await readBatch(io, match[1], 'en'));
     } catch { /* a malformed batch is skipped, not fatal for the list */ }
   }
   return batches.sort((a, b) => String(a.createdAt) < String(b.createdAt) ? -1 : String(a.createdAt) > String(b.createdAt) ? 1 : 0);
