@@ -65,15 +65,38 @@ function findSimilar(entries, item, limit = MAX_SIMILAR) {
   const ranked = search(entries, query, { kind: item.kind, limit: limit + exact.length })
     .map(hit => hit.entry)
     .filter(entry => !exact.includes(entry));
-  return [...exact, ...ranked].slice(0, limit);
+  const similar = [...exact, ...ranked];
+  // The map is the one entry a text search may legitimately miss: its title is
+  // stable while a fresh proposal's wording is not, and a retired map is not
+  // searchable at all. Reading it straight out of the corpus is what lets
+  // `optionsFor` offer the update when a map exists and the create when it does
+  // not — a search miss used to leave the card with no save action whatsoever.
+  if (item.kind === 'map') {
+    similar.unshift(...entries.filter(entry =>
+      entry.kind === 'map' && isActive(entry) && !similar.includes(entry)));
+  }
+  return similar.slice(0, limit);
 }
 
 // --- Decisions -------------------------------------------------------------
 
+/**
+ * The map is a singleton: create it once, then only ever update it. Offering
+ * both actions at once is what would let a project end up with two maps, so a
+ * map item lists exactly one save action. `duplicate` rides along whenever a
+ * map exists because `heuristicDecision` returns it for an unchanged body, and
+ * the card only ever shows the action the decision names: without the option
+ * the recommendation would name a choice the card cannot offer and the item
+ * would be left with "do not save" as its only entry.
+ */
 function optionsFor(item, similar) {
   if (item.kind === 'map') {
     const existing = similar.find(entry => entry.kind === 'map');
-    return existing ? [{ action: 'replace', targetId: existing.id, labelKey: 'mapUpdate' }] : [];
+    if (!existing) return [{ action: 'create', targetId: null, labelKey: 'create' }];
+    return [
+      { action: 'replace', targetId: existing.id, labelKey: 'mapUpdate' },
+      { action: 'duplicate', targetId: existing.id, labelKey: 'duplicate' },
+    ];
   }
   const options = [{ action: 'create', targetId: null, labelKey: 'create' }];
   for (const entry of similar) {

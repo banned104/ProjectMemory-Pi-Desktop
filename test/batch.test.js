@@ -16,6 +16,17 @@ const makeItem = (overrides = {}) => core.validateItems([{
 
 const makeBatch = (prepared, id = BATCH_ID) => core.buildBatch({ prepared, locale: 'en', id });
 
+/**
+ * A batch built the way `propose` builds one: similarity comes from the real
+ * corpus, so a test cannot hand-pick a `similar` list the plugin would never
+ * produce. Handing one in is how the map's missing create action stayed
+ * invisible: every map test supplied a `similar` list that already held a map.
+ */
+const propose = (entries, items) => {
+  const validated = items.map(overrides => makeItem(overrides));
+  return makeBatch(validated.map(item => ({ item, similar: core.findSimilar(entries, item) })));
+};
+
 /** Ids of everything currently in the memory directory. */
 const memoryIds = io => [...io.files.keys()]
   .filter(path => path.startsWith(`${MEMORY}/`))
@@ -84,12 +95,53 @@ test('the recommended option comes first and skip is always offered', () => {
   );
 });
 
-test('the map is offered as a singleton update and has no create option', () => {
+test('the map is a singleton: update when one exists, create when none does', () => {
   const map = makeEntry({ id: 'MAP', kind: 'map', title: 'Project map' });
-  const batch = makeBatch([{ item: makeItem({ kind: 'map', title: 'Project map' }), similar: [map] }]);
-  assert.deepEqual(batch.items[0].options.map(o => o.key), ['replace:MAP']);
-  assert.equal(batch.items[0].decision.action, 'replace');
-  assert.equal(batch.items[0].ask.at(-1).key, core.SKIP_KEY);
+  const existing = propose([map], [{ kind: 'map', title: 'Project map' }]);
+  assert.equal(existing.items[0].decision.action, 'replace');
+  assert.deepEqual(existing.items[0].ask.map(choice => choice.key), ['replace:MAP', core.SKIP_KEY]);
+
+  const fresh = propose([], [{ kind: 'map', title: 'Project map' }]);
+  assert.equal(fresh.items[0].decision.action, 'create');
+  assert.deepEqual(fresh.items[0].ask.map(choice => choice.key), ['create', core.SKIP_KEY]);
+});
+
+test('a map that shares no term with the proposal is still the update target', () => {
+  const active = makeEntry({
+    id: 'MAP', kind: 'map', title: 'Project map', keywords: ['layout'], body: 'Modules: src/boot',
+  });
+  // Nothing in the proposal appears in the map, so the ranked search alone
+  // would not surface it and the card would have had no save action at all.
+  const batch = propose([active], [{ kind: 'map', title: 'Zzz', keywords: [] }]);
+  assert.equal(batch.items[0].similar[0]?.id, 'MAP');
+  assert.deepEqual(batch.items[0].ask.map(choice => choice.key), ['replace:MAP', core.SKIP_KEY]);
+});
+
+test('a retired map does not take the create action away', () => {
+  const retired = makeEntry({ id: 'MAP', kind: 'map', title: 'Project map', status: 'retired' });
+  const batch = propose([retired], [{ kind: 'map', title: 'Project map' }]);
+  assert.equal(batch.items[0].decision.action, 'create');
+  assert.deepEqual(batch.items[0].ask.map(choice => choice.key), ['create', core.SKIP_KEY]);
+});
+
+test('every kind always offers a way to save, and the card leads with the recommendation', () => {
+  const corpora = [
+    ['an empty project', []],
+    ['a project that already has one', [makeEntry({ id: 'X', kind: 'lesson', title: 'Alpha', body: 'other body' })]],
+    ['a project whose map is retired', [makeEntry({ id: 'X', kind: 'lesson', title: 'Alpha', body: 'other body' })]],
+  ];
+  for (const kind of core.KINDS) {
+    for (const [label, entries] of corpora) {
+      const batch = propose(entries, [{ kind, title: 'Alpha' }]);
+      const item = batch.items[0];
+      const recommended = core.optionKey(item.decision.action, item.decision.targetId);
+      const where = `${kind} in ${label}`;
+      assert.equal(item.ask[0].key, recommended, `${where}: the card must lead with ${recommended}`);
+      assert.equal(item.ask.at(-1).key, core.SKIP_KEY, `${where}: the card must end with "do not save"`);
+      assert.ok(item.ask.some(choice => choice.key !== core.SKIP_KEY),
+        `${where}: the card must offer at least one way to save`);
+    }
+  }
 });
 
 test('an identical body is proposed as a duplicate', () => {
@@ -232,6 +284,20 @@ test('updating the map overwrites it in place and never deprecates it', async ()
   assert.equal(map.supersededBy, null);
   assert.equal(map.pinned, true);
   assert.equal(map.body, 'new layout: src/boot');
+});
+
+test('a project with no map creates one, as MAP.md', async () => {
+  const io = memoryIo({});
+  const batch = propose([], [{ kind: 'map', title: 'Project map', content: 'layout: src/boot' }]);
+  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'create' }]);
+
+  assert.deepEqual(result.saved.map(entry => entry.id), ['MAP']);
+  assert.deepEqual([...io.files.keys()], [`${MEMORY}/MAP.md`]);
+  const map = core.parseEntry(`${MEMORY}/MAP.md`, io.files.get(`${MEMORY}/MAP.md`));
+  assert.equal(map.kind, 'map');
+  assert.equal(map.body, 'layout: src/boot');
+  assert.equal(map.pinned, true);
+  assert.equal(map.batchRef, REF);
 });
 
 test('commit refuses to replace across kinds', async () => {
