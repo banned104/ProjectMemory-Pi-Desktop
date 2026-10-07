@@ -16,6 +16,11 @@ const makeItem = (overrides = {}) => core.validateItems([{
 
 const makeBatch = (prepared, id = BATCH_ID) => core.buildBatch({ prepared, locale: 'en', id });
 
+/** Ids of everything currently in the memory directory. */
+const memoryIds = io => [...io.files.keys()]
+  .filter(path => path.startsWith(`${MEMORY}/`))
+  .map(path => core.parseEntry(path, io.files.get(path)).id);
+
 // --- Proposal validation ---------------------------------------------------
 
 test('validateItems enforces the kind enum and the required fields', () => {
@@ -395,6 +400,76 @@ test('a retry can be run twice without producing a third copy', async () => {
 
   assert.equal(second.saved[0].id, first.saved[0].id);
   assert.equal([...replayIo.files.keys()].filter(p => p.startsWith(`${MEMORY}/`)).length, 1);
+});
+
+test('a retry of a replace does not trip over the target it retired', async () => {
+  const source = `${MEMORY}/LSN-20260101-old.md`;
+  const io = memoryIo({ [source]: mdFile('LSN-20260101-old', { title: 'Alpha' }) });
+  const batch = makeBatch([{
+    item: makeItem({ title: 'Alpha', content: 'a better answer' }),
+    similar: [core.parseEntry(source, io.files.get(source))],
+  }]);
+  const selections = [{ index: 0, key: 'replace:LSN-20260101-old' }];
+
+  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+  assert.equal(core.parseEntry(source, io.files.get(source)).status, 'deprecated', 'the first run retired the target');
+
+  const retryIo = memoryIo(io.snapshot());
+  const second = await core.commitBatch(retryIo, JSON.parse(JSON.stringify(batch)), selections);
+
+  assert.equal(second.saved[0].id, first.saved[0].id);
+  assert.equal(second.pending, 0);
+  const ids = memoryIds(retryIo);
+  assert.deepEqual([...ids].sort(), [first.saved[0].id, 'LSN-20260101-old'].sort(),
+    'the old entry is kept for the record, and the new one is not written twice');
+});
+
+test('a retired target does not block the rest of the batch on a retry', async () => {
+  const source = `${MEMORY}/LSN-20260101-old.md`;
+  const io = memoryIo({ [source]: mdFile('LSN-20260101-old', { title: 'Alpha' }) });
+  const batch = makeBatch([
+    { item: makeItem({ title: 'Alpha', content: 'a better answer' }), similar: [core.parseEntry(source, io.files.get(source))] },
+    { item: makeItem({ title: 'Beta', content: 'second' }), similar: [] },
+  ]);
+  const selections = [{ index: 0, key: 'replace:LSN-20260101-old' }, { index: 1, key: 'create' }];
+
+  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+  assert.equal(first.saved.length, 2);
+
+  // The inbox write-back failed, so the batch as re-read carries no `savedAs`.
+  const retryIo = memoryIo(io.snapshot());
+  const second = await core.commitBatch(retryIo, JSON.parse(JSON.stringify(batch)), selections);
+
+  assert.equal(second.saved.length, 2);
+  assert.equal(second.pending, 0);
+  assert.deepEqual([...memoryIds(retryIo)].sort(),
+    [first.saved[0].id, first.saved[1].id, 'LSN-20260101-old'].sort(),
+    'neither entry is written a second time');
+});
+
+test('a retry repairs a back-link the first run could not write', async () => {
+  const source = `${MEMORY}/LSN-20260101-old.md`;
+  const io = memoryIo({ [source]: mdFile('LSN-20260101-old', { title: 'Alpha' }) }, {
+    failWrite: target => target === source,
+  });
+  const batch = makeBatch([{
+    item: makeItem({ title: 'Alpha', content: 'a better answer' }),
+    similar: [core.parseEntry(source, io.files.get(source))],
+  }]);
+  const selections = [{ index: 0, key: 'replace:LSN-20260101-old' }];
+
+  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+  assert.equal(first.saved.length, 1);
+  assert.equal(first.warnings.length, 1, 'the back-link failure is reported, not swallowed');
+  assert.equal(core.parseEntry(source, io.files.get(source)).status, 'active', 'still active: the link never landed');
+
+  const retryIo = memoryIo(io.snapshot());
+  const second = await core.commitBatch(retryIo, JSON.parse(JSON.stringify(batch)), selections);
+
+  assert.equal(second.warnings.length, 0);
+  const old = core.parseEntry(source, retryIo.files.get(source));
+  assert.equal(old.status, 'deprecated');
+  assert.equal(old.supersededBy, first.saved[0].id);
 });
 
 // --- Inbox -----------------------------------------------------------------

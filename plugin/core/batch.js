@@ -283,7 +283,9 @@ async function retireBatch(io, batch, result) {
  *
  * Idempotency does not depend on the inbox write succeeding: every entry this
  * batch wrote carries `batchRef`, so a retry finds what already landed and
- * adopts it instead of writing a second copy.
+ * adopts it instead of writing a second copy. A replayed item skips target
+ * validation on purpose: the entry it replaced is legitimately retired by now,
+ * and that must not block the rest of the batch.
  */
 async function commitBatch(io, batch, selections, options = {}) {
   const date = options.date ?? localDate();
@@ -308,56 +310,64 @@ async function commitBatch(io, batch, selections, options = {}) {
     const option = item.options.find(candidate => candidate.key === selection.key);
     if (!option) throw new Error(t(locale, 'invalidAction', sanitize(item.title, MAX_TITLE)));
     if (option.action === 'duplicate') continue;
+    // An item this batch already wrote in an earlier run needs no validation:
+    // it is on disk. Everything below protects a *new* write, and the target a
+    // landed item replaced is legitimately retired by now — that must not
+    // block the retry.
+    const replay = landed.get(replayKey(item.kind, item.title)) ?? null;
     let target = null;
     if (option.targetId) {
-      target = byId.get(option.targetId);
-      if (!target || !isActive(target)) {
-        throw new Error(t(locale, 'targetGone', sanitize(item.title, MAX_TITLE), option.targetId));
-      }
-      if (option.action === 'replace' && target.kind !== item.kind) {
-        throw new Error(t(locale, 'kindMismatch', target.id));
-      }
-      if (option.action === 'replace'
-        && plan.some(entry => entry.option.action === 'replace' && entry.target.id === target.id)) {
-        throw new Error(t(locale, 'oneReplacement', target.id));
+      target = byId.get(option.targetId) ?? null;
+      if (!replay) {
+        if (!target || !isActive(target)) {
+          throw new Error(t(locale, 'targetGone', sanitize(item.title, MAX_TITLE), option.targetId));
+        }
+        if (option.action === 'replace' && target.kind !== item.kind) {
+          throw new Error(t(locale, 'kindMismatch', target.id));
+        }
+        if (option.action === 'replace'
+          && plan.some(entry => entry.option.action === 'replace' && entry.target?.id === target.id)) {
+          throw new Error(t(locale, 'oneReplacement', target.id));
+        }
       }
     }
-    plan.push({ item, option, target });
+    plan.push({ item, option, target, replay });
   }
 
   const taken = new Set(entries.map(entry => entry.id));
   const saved = [];
   const warnings = [];
   try {
-    for (const { item, option, target } of plan) {
-      const replay = landed.get(replayKey(item.kind, item.title));
+    for (const { item, option, target, replay } of plan) {
+      let id;
+      let source;
       if (replay) {
-        item.savedAs = replay.id;
-        saved.push({
-          id: replay.id, kind: item.kind, title: item.title,
-          source: replay.source, action: option.action, targetId: option.targetId,
-        });
-        continue;
+        id = replay.id;
+        source = replay.source;
+      } else {
+        id = newEntryId(item.kind, item.title, date, taken);
+        taken.add(id);
+        source = `${MEMORY_DIR}/${id}.md`;
+        await io.writeText(source, renderEntry({
+          id,
+          kind: item.kind,
+          title: item.title,
+          keywords: item.keywords,
+          content: item.content,
+          created: date,
+          pinned: item.pin,
+          batchRef: batch.ref,
+          supersedes: option.action === 'replace' ? target?.id ?? null : null,
+          related: option.action === 'conflict' && target ? [target.id] : [],
+        }));
       }
-      const id = newEntryId(item.kind, item.title, date, taken);
-      taken.add(id);
-      const source = `${MEMORY_DIR}/${id}.md`;
-      await io.writeText(source, renderEntry({
-        id,
-        kind: item.kind,
-        title: item.title,
-        keywords: item.keywords,
-        content: item.content,
-        created: date,
-        pinned: item.pin,
-        batchRef: batch.ref,
-        supersedes: option.action === 'replace' ? target.id : null,
-        related: option.action === 'conflict' ? [target.id] : [],
-      }));
       item.savedAs = id;
       saved.push({ id, kind: item.kind, title: item.title, source, action: option.action, targetId: option.targetId });
 
-      // The new entry is already safe on disk; a failed back-link is reported, not rolled back.
+      // The entry is already safe on disk; a failed back-link is reported, not
+      // rolled back. It runs for a replayed item too: the fields written are
+      // the same both times, which is what makes a retry converge instead of
+      // leaving an earlier partial run half-linked.
       // The map is a singleton: replacing it overwrites the same file, so there
       // is no old entry to retire.
       if (item.kind !== 'map' && target && (option.action === 'replace' || option.action === 'conflict')) {
