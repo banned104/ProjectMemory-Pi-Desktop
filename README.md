@@ -26,7 +26,7 @@ PI-Desktop 插件「项目记忆」的重设计实现。**思路不变，实现�
 ```
 plugin/            会被打包进 .piplug 的内容
   manifest.json
-  main.js          插件进程：3 个工具 + 面板后端 + 设置
+  main.js          插件进程：3 个工具 + 两个界面的后端 + 设置
   extension.js     agent 扩展：注入钩子 + 确认写入
   fs-guard.js      受限文件访问（独立可测）
   core/
@@ -36,7 +36,12 @@ plugin/            会被打包进 .piplug 的内容
     search.js      分词 / 打分 / 注入块渲染
     batch.js       批次 / 卡片 / 确认 / 提交
     i18n.js        中英文案
-  renderer/index.html
+    memory.js      视图的卡片模型 / 统计 / 编辑校验 / 删除目标校验
+  renderer/index.html   确认面板（待确认批次）
+  views/
+    index.html     项目记忆视图：外壳与样式（自包含）
+    ui.js          纯渲染与筛选，所有转义规则在这里
+    app.js         视图接线：状态与通道往返，不拼任何字符串
 test/              node --test 单元测试
 docs/              审计报告与机制解读（本次重设计的输入）
 dist/              打包产物
