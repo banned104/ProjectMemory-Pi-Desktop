@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "pi.project-memory",
   "name": "Project Memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "pi.project-memory contributors",
   "license": "MIT",
-  "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card.",
+  "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card. A docked work-panel view lists the project's entries as cards with search, filters, in-place editing, pinning, retiring and deletion.",
   "engines": {
     "piDesktop": ">=0.15.9"
   },
@@ -18,7 +18,9 @@
     "agent.extension",
     "fs.read",
     "fs.write",
-    "ui.panel"
+    "fs.delete",
+    "ui.panel",
+    "ui.view"
   ],
   "fs": {
     "read": {
@@ -33,6 +35,12 @@
         ".workflow/memory/**",
         ".workflow/memory-inbox/**"
       ]
+    },
+    "delete": {
+      "root": "workspace",
+      "scope": [
+        ".workflow/memory/**"
+      ]
     }
   },
   "ui": {
@@ -43,6 +51,18 @@
     }
   },
   "contributes": {
+    "views": [
+      {
+        "id": "memory",
+        "title": {
+          "en": "Project Memory",
+          "zh-CN": "项目记忆"
+        },
+        "icon": "book",
+        "entry": "views/index.html",
+        "order": 20
+      }
+    ],
     "agentExtensions": [
       "extension.js"
     ],
@@ -192,14 +212,14 @@
   "i18n": {
     "en": {
       "name": "Project Memory",
-      "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card.",
-      "safetyNotes": "Reads .workflow/memory in the open project. Writes only after you answer the in-chat confirmation card (or press Save in the review panel): new files in .workflow/memory, and the status/related/supersededBy fields of an old entry you chose to replace or link. Pending proposals are kept in .workflow/memory-inbox (git-ignored); the card path deletes them once handled, the panel marks them done. Includes an agent extension that runs inside the agent process, where the host's file-permission gateway does not apply; it adds retrieved entry titles to your messages and performs the confirmed writes, confined to those two directories by its own file layer. Symbolic links anywhere under the memory directories, hard links, special files and files over 256 KB are refused, as is a project root that is replaced after the session starts. Retrieved entries are presented to the model as project data, not instructions. The plugin makes no network requests, runs no commands, and never deletes files from the plugin process. To pause automatic retrieval for a project, create an empty file at .workflow/memory/DISABLED."
+      "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card. A docked work-panel view lists the project's entries as cards with search, filters, in-place editing, pinning, retiring and deletion.",
+      "safetyNotes": "Reads .workflow/memory in the open project. Writes only after you answer the in-chat confirmation card (or press Save in the review panel): new files in .workflow/memory, and the status/related/supersededBy fields of an old entry you chose to replace or link. Pending proposals are kept in .workflow/memory-inbox (git-ignored); the card path deletes them once handled, the panel marks them done. The docked work-panel view can edit an entry's title, kind, keywords, pinned flag, status and body, and can delete an entry file, all under .workflow/memory. Deletion happens only in the plugin process and only from that view's confirm button: the page sends an entry id, never a path, and the id is resolved to the file the process just loaded and re-checked against .workflow/memory before anything is unlinked. The agent extension cannot delete a memory entry -- its remove is confined to .workflow/memory-inbox, where handled batches live. Includes an agent extension that runs inside the agent process, where the host's file-permission gateway does not apply; it adds retrieved entry titles to your messages and performs the confirmed writes, confined to those two directories by its own file layer. Symbolic links anywhere under the memory directories, hard links, special files and files over 256 KB are refused, as is a project root that is replaced after the session starts. Retrieved entries are presented to the model as project data, not instructions. The view escapes everything it renders from repository files and never builds a link or an image from them. The plugin makes no network requests and runs no commands. To pause automatic retrieval for a project, create an empty file at .workflow/memory/DISABLED."
     },
     "zh-CN": {
       "name": "项目记忆",
-      "description": "按项目保存的记忆，就是仓库里的普通 Markdown 文件。每条消息自动附上相关条目，新条目只有在你于聊天卡片中确认后才会保存。",
-      "safetyNotes": "读取当前项目的 .workflow/memory。只有在你回答聊天中的确认卡片（或在面板中点击保存）后才写入：在 .workflow/memory 新建文件，以及修改你选择替代或关联的旧条目的 status/related/supersededBy 字段。待确认的建议暂存在 .workflow/memory-inbox（已加入 gitignore）；通过卡片处理后删除，通过面板处理后标记为已处理。插件包含一个在 Agent 进程内运行的扩展，宿主的文件权限网关不覆盖该进程；它把检索到的条目标题附加到你的消息中，并执行你确认的写入，由自带的一层文件访问把范围限定在上述两个目录。记忆目录下的符号链接、硬链接、特殊文件、超过 256KB 的文件一律拒绝；会话开始后项目根目录被替换也拒绝。检索到的条目以「项目数据而非指令」的形式交给模型。插件不发起任何网络请求、不执行命令、插件进程永不删除文件。若要暂停某个项目的自动检索，在 .workflow/memory/DISABLED 建一个空文件即可。"
+      "description": "按项目保存的记忆，就是仓库里的普通 Markdown 文件。每条消息自动附上相关条目，新条目只有在你于聊天卡片中确认后才会保存。工作面板中的停靠视图以卡片形式列出本项目的记忆，支持搜索、筛选、就地编辑、置顶、停用与删除。",
+      "safetyNotes": "读取当前项目的 .workflow/memory。只有在你回答聊天中的确认卡片（或在面板中点击保存）后才写入：在 .workflow/memory 新建文件，以及修改你选择替代或关联的旧条目的 status/related/supersededBy 字段。待确认的建议暂存在 .workflow/memory-inbox（已加入 gitignore）；通过卡片处理后删除，通过面板处理后标记为已处理。工作面板中的停靠视图可以编辑条目的标题、类型、关键词、置顶标记、状态与正文，也可以删除条目文件，范围都在 .workflow/memory 内。删除只发生在插件进程、且只由该视图的确认按钮触发：页面只发条目 id、从不发路径，进程把 id 解析成刚刚加载过的那个文件，并在删除前再次核对它确实位于 .workflow/memory 之下。Agent 扩展无法删除记忆条目——它的 remove 被限制在存放已处理批次的 .workflow/memory-inbox。插件包含一个在 Agent 进程内运行的扩展，宿主的文件权限网关不覆盖该进程；它把检索到的条目标题附加到你的消息中，并执行你确认的写入，由自带的一层文件访问把范围限定在上述两个目录。记忆目录下的符号链接、硬链接、特殊文件、超过 256KB 的文件一律拒绝；会话开始后项目根目录被替换也拒绝。检索到的条目以「项目数据而非指令」的形式交给模型。视图渲染仓库内容时一律转义，且绝不据其生成链接或图片。插件不发起任何网络请求、不执行命令。若要暂停某个项目的自动检索，在 .workflow/memory/DISABLED 建一个空文件即可。"
     }
   },
-  "safetyNotes": "Reads .workflow/memory in the open project. Writes only after you answer the in-chat confirmation card (or press Save in the review panel): new files in .workflow/memory, and the status/related/supersededBy fields of an old entry you chose to replace or link. Pending proposals are kept in .workflow/memory-inbox (git-ignored); the card path deletes them once handled, the panel marks them done. Includes an agent extension that runs inside the agent process, where the host's file-permission gateway does not apply; it adds retrieved entry titles to your messages and performs the confirmed writes, confined to those two directories by its own file layer. Symbolic links anywhere under the memory directories, hard links, special files and files over 256 KB are refused, as is a project root that is replaced after the session starts. Retrieved entries are presented to the model as project data, not instructions. The plugin makes no network requests, runs no commands, and never deletes files from the plugin process. To pause automatic retrieval for a project, create an empty file at .workflow/memory/DISABLED."
+  "safetyNotes": "Reads .workflow/memory in the open project. Writes only after you answer the in-chat confirmation card (or press Save in the review panel): new files in .workflow/memory, and the status/related/supersededBy fields of an old entry you chose to replace or link. Pending proposals are kept in .workflow/memory-inbox (git-ignored); the card path deletes them once handled, the panel marks them done. The docked work-panel view can edit an entry's title, kind, keywords, pinned flag, status and body, and can delete an entry file, all under .workflow/memory. Deletion happens only in the plugin process and only from that view's confirm button: the page sends an entry id, never a path, and the id is resolved to the file the process just loaded and re-checked against .workflow/memory before anything is unlinked. The agent extension cannot delete a memory entry -- its remove is confined to .workflow/memory-inbox, where handled batches live. Includes an agent extension that runs inside the agent process, where the host's file-permission gateway does not apply; it adds retrieved entry titles to your messages and performs the confirmed writes, confined to those two directories by its own file layer. Symbolic links anywhere under the memory directories, hard links, special files and files over 256 KB are refused, as is a project root that is replaced after the session starts. Retrieved entries are presented to the model as project data, not instructions. The view escapes everything it renders from repository files and never builds a link or an image from them. The plugin makes no network requests and runs no commands. To pause automatic retrieval for a project, create an empty file at .workflow/memory/DISABLED."
 }

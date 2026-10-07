@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="pi-plugin-chrome" content="v2" />
+    <title>Project Memory</title>
+    <!--
+      No CDN, no fonts, no images: plugin pages get no egress unless the
+      manifest names domains, and this plugin names none. Everything below is
+      in the package. The palette follows prefers-color-scheme and is
+      overridden by data-theme when the host reports a resolved base.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --pm-bg: #f6f6f7;
+        --pm-fg: #1b1b1f;
+        --pm-muted: #6c6c75;
+        --pm-card: #ffffff;
+        --pm-line: #e3e3e8;
+        --pm-chip: #ececf0;
+        --pm-accent: #3d5afe;
+        --pm-danger: #c0362c;
+        --pm-danger-bg: #fdeceb;
+        --pm-shadow: 0 1px 2px rgba(16, 16, 20, 0.06), 0 1px 8px rgba(16, 16, 20, 0.04);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --pm-bg: #17171a;
+          --pm-fg: #e8e8ec;
+          --pm-muted: #9a9aa4;
+          --pm-card: #1f1f24;
+          --pm-line: #2e2e36;
+          --pm-chip: #292930;
+          --pm-accent: #8f9dff;
+          --pm-danger: #ff8a80;
+          --pm-danger-bg: #3a2220;
+          --pm-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+        }
+      }
+
+      :root[data-theme="dark"] {
+        --pm-bg: #17171a;
+        --pm-fg: #e8e8ec;
+        --pm-muted: #9a9aa4;
+        --pm-card: #1f1f24;
+        --pm-line: #2e2e36;
+        --pm-chip: #292930;
+        --pm-accent: #8f9dff;
+        --pm-danger: #ff8a80;
+        --pm-danger-bg: #3a2220;
+        --pm-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      }
+
+      :root[data-theme="light"] {
+        --pm-bg: #f6f6f7;
+        --pm-fg: #1b1b1f;
+        --pm-muted: #6c6c75;
+        --pm-card: #ffffff;
+        --pm-line: #e3e3e8;
+        --pm-chip: #ececf0;
+        --pm-accent: #3d5afe;
+        --pm-danger: #c0362c;
+        --pm-danger-bg: #fdeceb;
+        --pm-shadow: 0 1px 2px rgba(16, 16, 20, 0.06), 0 1px 8px rgba(16, 16, 20, 0.04);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--pm-bg);
+        color: var(--pm-fg);
+        padding: var(--pi-plugin-titlebar-height, 0) 0 0;
+      }
+
+      #root { display: flex; flex-direction: column; min-height: 100vh; }
+
+      /* --- head --- */
+      #head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px 8px;
+        position: sticky;
+        top: var(--pi-plugin-titlebar-height, 0);
+        background: var(--pm-bg);
+        z-index: 2;
+      }
+
+      #title { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+      #project {
+        color: var(--pm-muted);
+        font-size: 11px;
+        max-width: 22ch;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #search {
+        flex: 1;
+        min-width: 80px;
+        padding: 5px 9px;
+        border: 1px solid var(--pm-line);
+        border-radius: 7px;
+        background: var(--pm-card);
+        color: inherit;
+        font: inherit;
+        outline: none;
+      }
+      #search:focus { border-color: var(--pm-accent); }
+
+      .pm-btn {
+        border: 1px solid var(--pm-line);
+        background: var(--pm-card);
+        color: inherit;
+        border-radius: 7px;
+        padding: 4px 9px;
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .pm-btn:hover { border-color: var(--pm-accent); }
+      .pm-btn:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
+      .pm-btn[aria-pressed="true"] {
+        background: var(--pm-accent);
+        border-color: var(--pm-accent);
+        color: var(--pm-bg);
+      }
+      .pm-btn.pm-primary { background: var(--pm-accent); border-color: var(--pm-accent); color: var(--pm-bg); }
+      .pm-btn.pm-danger { color: var(--pm-danger); border-color: color-mix(in srgb, var(--pm-danger) 40%, var(--pm-line)); }
+      .pm-btn.pm-danger:hover { background: var(--pm-danger-bg); border-color: var(--pm-danger); }
+
+      /* --- notice --- */
+      #notice {
+        margin: 0 12px 8px;
+        padding: 7px 10px;
+        border: 1px solid color-mix(in srgb, var(--pm-danger) 35%, var(--pm-line));
+        background: var(--pm-danger-bg);
+        color: var(--pm-danger);
+        border-radius: 8px;
+        font-size: 12px;
+      }
+
+      /* --- stats --- */
+      .pm-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 0 12px 8px;
+      }
+      .pm-stat {
+        display: flex;
+        align-items: baseline;
+        gap: 5px;
+        padding: 4px 9px;
+        border: 1px solid var(--pm-line);
+        background: var(--pm-card);
+        border-radius: 999px;
+        font-size: 11px;
+        color: var(--pm-muted);
+      }
+      .pm-stat strong { font-size: 13px; color: var(--pm-fg); font-variant-numeric: tabular-nums; }
+      .pm-stat-action { cursor: pointer; font: inherit; }
+      .pm-stat-action:hover { border-color: var(--pm-accent); color: var(--pm-fg); }
+
+      /* --- filters --- */
+      #filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding: 0 12px 10px;
+        border-bottom: 1px solid var(--pm-line);
+      }
+
+      /* --- cards --- */
+      .pm-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+        gap: 10px;
+        padding: 12px;
+        align-content: start;
+      }
+
+      .pm-card {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 11px 8px;
+        border: 1px solid var(--pm-line);
+        border-radius: 10px;
+        background: var(--pm-card);
+        box-shadow: var(--pm-shadow);
+        min-width: 0;
+      }
+      .pm-card-off { opacity: 0.62; }
+      .pm-card-head { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      .pm-badge {
+        font-size: 10px;
+        line-height: 1.6;
+        padding: 0 6px;
+        border-radius: 999px;
+        border: 1px solid var(--pm-line);
+        color: var(--pm-muted);
+        white-space: nowrap;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .pm-kind { border-color: transparent; font-weight: 600; }
+      .pm-kind-lesson { background: color-mix(in srgb, var(--pm-danger) 14%, transparent); color: var(--pm-danger); }
+      .pm-kind-rule { background: color-mix(in srgb, var(--pm-accent) 16%, transparent); color: var(--pm-accent); }
+      .pm-kind-decision { background: color-mix(in srgb, #8a6d1f 18%, transparent); color: #8a6d1f; }
+      .pm-kind-procedure { background: color-mix(in srgb, #1f8a5c 16%, transparent); color: #1f8a5c; }
+      .pm-kind-map { background: color-mix(in srgb, #6c3fb8 16%, transparent); color: #6c3fb8; }
+      .pm-kind-preference { background: color-mix(in srgb, #b83f86 16%, transparent); color: #b83f86; }
+      :root[data-theme="dark"] .pm-kind-decision,
+      :root[data-theme="dark"] .pm-kind-procedure,
+      :root[data-theme="dark"] .pm-kind-map,
+      :root[data-theme="dark"] .pm-kind-preference { filter: brightness(1.5); }
+
+      .pm-card-title {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+      .pm-card-summary {
+        margin: 0;
+        color: var(--pm-muted);
+        font-size: 12px;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+      }
+      .pm-keywords {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .pm-keywords li {
+        font-size: 10px;
+        color: var(--pm-muted);
+        background: var(--pm-chip);
+        border-radius: 5px;
+        padding: 1px 6px;
+        overflow-wrap: anywhere;
+      }
+      .pm-card-foot {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: auto;
+        padding-top: 6px;
+        border-top: 1px solid var(--pm-line);
+      }
+      .pm-meta {
+        font-size: 10px;
+        color: var(--pm-muted);
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+        max-width: 100%;
+      }
+      .pm-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-left: auto; }
+
+      /* --- editor --- */
+      .pm-form {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid var(--pm-accent);
+        border-radius: 10px;
+        background: var(--pm-card);
+      }
+      .pm-row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .pm-row .pm-field { flex: 1 1 160px; }
+      .pm-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      .pm-field > span { font-size: 11px; color: var(--pm-muted); }
+      .pm-field input,
+      .pm-field select,
+      .pm-field textarea {
+        border: 1px solid var(--pm-line);
+        border-radius: 7px;
+        background: var(--pm-bg);
+        color: inherit;
+        font: inherit;
+        padding: 5px 8px;
+        outline: none;
+        width: 100%;
+      }
+      .pm-field textarea { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; resize: vertical; }
+      .pm-field input:focus,
+      .pm-field select:focus,
+      .pm-field textarea:focus { border-color: var(--pm-accent); }
+      .pm-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--pm-muted); }
+
+      /* --- states --- */
+      .pm-empty, .pm-loading {
+        grid-column: 1 / -1;
+        text-align: center;
+        color: var(--pm-muted);
+        padding: 36px 12px;
+      }
+      .pm-empty h3 { margin: 0 0 4px; font-size: 13px; color: var(--pm-fg); }
+      .pm-empty p { margin: 0; font-size: 12px; }
+
+      #toast {
+        position: fixed;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        padding: 7px 14px;
+        border-radius: 999px;
+        background: var(--pm-fg);
+        color: var(--pm-bg);
+        font-size: 12px;
+        box-shadow: var(--pm-shadow);
+        max-width: 80vw;
+      }
+      #toast.pm-toast-error { background: var(--pm-danger); color: #fff; }
+
+      #overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(12, 12, 16, 0.42);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      #overlay[hidden] { display: none; }
+      .pm-dialog {
+        background: var(--pm-card);
+        color: var(--pm-fg);
+        border: 1px solid var(--pm-line);
+        border-radius: 12px;
+        padding: 16px;
+        max-width: 380px;
+        width: 100%;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+      }
+      .pm-dialog h3 { margin: 0 0 6px; font-size: 14px; }
+      .pm-dialog p { margin: 0 0 12px; font-size: 12px; color: var(--pm-muted); }
+    </style>
+    <script src="./ui.js" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div id="root">
+      <header id="head">
+        <h1 id="title">Project Memory</h1>
+        <span id="project"></span>
+        <input id="search" type="search" autocomplete="off" spellcheck="false" />
+        <button id="refresh" type="button" class="pm-btn">Refresh</button>
+      </header>
+
+      <div id="notice" hidden></div>
+
+      <section id="stats" class="pm-stats" aria-label="Overview"></section>
+
+      <div id="filters" role="group" aria-label="Filters">
+        <button type="button" class="pm-btn" data-filter="lesson" aria-pressed="false">Lesson</button>
+        <button type="button" class="pm-btn" data-filter="rule" aria-pressed="false">Rule</button>
+        <button type="button" class="pm-btn" data-filter="decision" aria-pressed="false">Decision</button>
+        <button type="button" class="pm-btn" data-filter="procedure" aria-pressed="false">Procedure</button>
+        <button type="button" class="pm-btn" data-filter="map" aria-pressed="false">Map</button>
+        <button type="button" class="pm-btn" data-filter="preference" aria-pressed="false">Preference</button>
+        <button type="button" class="pm-btn" data-filter="status" aria-pressed="false">All</button>
+        <button type="button" class="pm-btn" data-filter="pinned" aria-pressed="false">Pinned only</button>
+      </div>
+
+      <main id="cards" class="pm-grid"></main>
+    </div>
+
+    <div id="toast" hidden></div>
+    <div id="overlay" hidden></div>
+  </body>
+</html>

@@ -351,9 +351,14 @@ function confirmHtml({ locale = 'en' } = {}) {
   ].join('');
 }
 
-module.exports = {
+const api = {
   KINDS, TEXT, localeOf, t, kindLabel,
   esc, inline, markdown,
   matchesQuery, filterCards,
   cardHtml, formHtml, statsHtml, emptyHtml, confirmHtml,
 };
+
+// Both the browser page and the Node test runner load this file. Only the
+// second has `module`; the first gets the same object on `globalThis`.
+if (typeof module !== 'undefined' && module.exports) module.exports = api;
+else globalThis.PM = api;
