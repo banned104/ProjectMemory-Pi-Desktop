@@ -197,6 +197,36 @@ test('a question without this batch marker is ignored', () => {
   assert.deepEqual(core.selectionsFromAnswers(batch, foreign, [['anything']]), { selections: [], notes: [] });
 });
 
+test('a retyped label is accepted, with or without the recommended marker', () => {
+  const batch = propose([], [{ title: 'Alpha' }]);
+  const { questions } = core.askToolArgs(batch);
+  const decorated = batch.items[0].ask[0].label;
+  const bare = decorated.replace(/^Recommended · /, '');
+
+  for (const typed of [decorated, bare, `  ${bare.toUpperCase()}  `]) {
+    const { selections, notes } = core.selectionsFromAnswers(batch, questions, [[typed]]);
+    assert.deepEqual(selections, [{ index: 0, key: 'create' }], `"${typed}" must reach the create option`);
+    assert.deepEqual(notes, []);
+  }
+});
+
+test('an unmatched answer names the labels the card offered', () => {
+  for (const [locale, marker] of [['en', /is not one of the card's options/], ['zh-CN', /不是卡片上的选项/]]) {
+    const batch = core.buildBatch({
+      prepared: [{ item: makeItem({ title: 'Alpha' }), similar: [] }], locale, id: BATCH_ID,
+    });
+    const { questions } = core.askToolArgs(batch);
+    const { selections, notes } = core.selectionsFromAnswers(batch, questions, [['这个可以记录']]);
+
+    assert.deepEqual(selections, [], 'a typed answer is never guessed into a verdict');
+    assert.equal(notes.length, 1);
+    assert.match(notes[0], marker);
+    for (const label of batch.items[0].ask.map(choice => choice.label)) {
+      assert.ok(notes[0].includes(label), `${locale}: the note must name "${label}"`);
+    }
+  }
+});
+
 // --- Commit ----------------------------------------------------------------
 
 test('create writes one entry carrying the batch reference', async () => {

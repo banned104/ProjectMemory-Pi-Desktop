@@ -22,6 +22,8 @@ const MAX_TITLE = 120;
 const MAX_CONTENT = 8000;
 const MAX_KEYWORDS = 12;
 const MAX_SIMILAR = 3;
+/** Room for every label of one card, so a failure can name all of them. */
+const MAX_OPTIONS_CHARS = 400;
 
 const BATCH_ID_RE = /^KB-[0-9a-f-]{36}$/;
 
@@ -215,9 +217,25 @@ function askToolArgs(batch) {
 }
 
 /**
+ * How a typed answer is compared with a card label. The host always offers a
+ * free-text box beside the options, and the labels are long, localized and
+ * decorated with the "recommended" marker, so a user who retypes a label by
+ * hand must still land on it. `normalize` folds case, width and whitespace
+ * runs; the decoration is stripped from both sides, which makes
+ * "Recommended · New: ..." and "New: ..." the same answer.
+ *
+ * Nothing here guesses intent. An answer that does not reduce to a label the
+ * card actually offered stays undecided, and the note names the labels that
+ * were available so the user can answer again.
+ */
+const RECOMMENDED_DECORATION = /^(?:推荐|recommended)\s*·\s*/i;
+const answerForm = value => normalize(value).replace(RECOMMENDED_DECORATION, '');
+
+/**
  * Map genuine asktool answers back to selections. Only options this plugin
- * generated count. An explicit "do not save" is recorded as a verdict; a
- * typed-in answer or an unanswered question leaves that item undecided.
+ * generated count. An explicit "do not save" is recorded as a verdict; an
+ * answer that matches no label, or an unanswered question, leaves that item
+ * undecided.
  */
 function selectionsFromAnswers(batch, questions, answers) {
   const selections = [];
@@ -233,13 +251,20 @@ function selectionsFromAnswers(batch, questions, answers) {
       notes.push(t(batch.locale, 'unanswered', sanitize(item.title, MAX_TITLE)));
       return;
     }
-    const choice = item.ask.find(candidate => candidate.label === String(answer[0]).trim());
+    const typed = answerForm(answer[0]);
+    const choice = typed ? item.ask.find(candidate => answerForm(candidate.label) === typed) : null;
     if (!choice) {
-      notes.push(t(batch.locale, 'notAnOption', sanitize(item.title, MAX_TITLE), sanitize(String(answer[0]), 40)));
+      // Name the choices the card did offer. Without them the free-text box is
+      // a dead end: the user has no way to learn what the card accepts.
+      const offered = sanitize(item.ask.map(candidate => candidate.label).join(' / '), MAX_OPTIONS_CHARS);
+      notes.push(t(
+        batch.locale, 'notAnOption',
+        sanitize(item.title, MAX_TITLE), sanitize(String(answer[0]), 40), offered,
+      ));
       return;
     }
-    // "Do not save" is still a verdict and is recorded as one. Only a free-text
-    // answer or an unanswered question leaves the item undecided.
+    // "Do not save" is still a verdict and is recorded as one. Only an answer
+    // that matches nothing or an unanswered question leaves the item undecided.
     selections.push({ index: itemIndex, key: choice.key });
   });
   return { selections, notes };

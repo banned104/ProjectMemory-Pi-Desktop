@@ -1,8 +1,8 @@
 'use strict';
 
 // Every user-visible string the plugin process and the agent extension share.
-// Card wording matters: `selectionsFromAnswers` matches option labels by exact
-// string, so a label and its key must stay paired here.
+// Card wording matters: `selectionsFromAnswers` matches the user's answer
+// against these labels, so a label and its key must stay paired here.
 
 const localeOf = locale => (/^zh/i.test(String(locale ?? '')) ? 'zh-CN' : 'en');
 
@@ -48,7 +48,7 @@ const MESSAGES = {
     oneReplacement: id => `同一次提交中 ${id} 只能被替代一次`,
 
     unanswered: title => `未作答：${title}`,
-    notAnOption: (title, answer) => `${title} 的答案「${answer}」不是卡片上的选项`,
+    notAnOption: (title, answer, offered) => `${title} 的答案「${answer}」不是卡片上的选项；可选：${offered}（请重新作答）`,
     batchMissing: '待确认批次不存在或已被处理',
     busy: '该批次正在处理中，请稍候',
 
@@ -99,7 +99,7 @@ const MESSAGES = {
     oneReplacement: id => `${id} can only be replaced once per commit`,
 
     unanswered: title => `unanswered: ${title}`,
-    notAnOption: (title, answer) => `the answer "${answer}" for ${title} is not one of the card's options`,
+    notAnOption: (title, answer, offered) => `the answer "${answer}" for ${title} is not one of the card's options; available: ${offered} (answer again with one of them)`,
     batchMissing: 'the pending batch does not exist or was already handled',
     busy: 'this batch is already being processed',
 
