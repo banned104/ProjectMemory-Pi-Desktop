@@ -189,3 +189,30 @@ test('whole-word matching still rejects a prefix of a longer word', () => {
   const entry = makeEntry({ title: 'Knowledge base conventions', summary: 'About knowledge' });
   assert.equal(core.search([entry], 'know').length, 0);
 });
+
+test('strict keeps a title hit even when the term is common in the corpus', () => {
+  // `strong` is IDF weighted, so the old absolute floor of 2 threw away exactly
+  // the entries this tier exists for. Measured before the fix: with 3 titles
+  // and 7 bodies mentioning `config` in 20 files, a title hit scored 1.08 and
+  // the whole strict tier came back empty.
+  const corpus = [
+    ...[0, 1, 2].map(i => makeEntry({ id: `LSN-20260101-t${i}`, title: `config loader ${i}` })),
+    ...[0, 1, 2, 3, 4, 5, 6].map(i => makeEntry({
+      id: `LSN-20260101-b${i}`,
+      title: `other topic ${i}`,
+      summary: 'mentions config in passing',
+    })),
+    ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => makeEntry({ id: `LSN-20260101-x${i}`, title: `unrelated ${i}` })),
+  ];
+  const strict = core.search(corpus, 'config', { strict: true });
+  assert.equal(strict.length, 3, 'every title hit is retrieved');
+  assert.deepEqual(strict.map(hit => hit.entry.id).sort(), [
+    'LSN-20260101-t0', 'LSN-20260101-t1', 'LSN-20260101-t2',
+  ]);
+
+  // What did not change: one weak body hit is still not enough on its own, and
+  // the non-strict threshold is untouched (it needs two weak groups).
+  const bodyOnly = makeEntry({ id: 'LSN-20260101-c', title: 'Alpha title', summary: 'beta gamma' });
+  assert.equal(core.search([bodyOnly], 'beta gamma', { strict: true }).length, 0);
+  assert.equal(core.search(corpus, 'config').length, 3);
+});

@@ -136,8 +136,15 @@ function fieldHit(record, term, strong) {
     : record.summaryWords.has(term) || record.bodyWords.has(term);
 }
 
-/** A single strong group is enough for automatic retrieval, but it must score. */
-const STRICT_MIN_SCORE = 2;
+/**
+ * Automatic retrieval needs one strong group: a hit in the title or the
+ * keywords. Two weak body hits are not enough there.
+ *
+ * An earlier version also demanded an absolute score of 2 on top of that.
+ * `strong` is IDF weighted, so the floor discarded the very entries this tier
+ * exists for as soon as a term appeared in more than a couple of files: a
+ * title hit scored 1.89 in a two-file corpus and 1.08 in a twenty-file one.
+ */
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
 
@@ -198,7 +205,7 @@ function search(entries, query, options = {}) {
     }
     const score = strong + Math.min(weak, 2);
     const keep = strict
-      ? strong > 0 && score >= STRICT_MIN_SCORE
+      ? strong > 0
       : strong > 0 || weakGroups >= 2;
     if (keep) hits.push({ entry: pool[i], score, strong, weak });
   }
@@ -279,5 +286,5 @@ function renderBlock({ pinned, hidden = 0, hits }, loadTool) {
 
 module.exports = {
   termGroups, prepared, search, toResult, toLoaded, renderBlock, splitPinned,
-  STRICT_MIN_SCORE, DEFAULT_LIMIT, MAX_LIMIT, MAX_PINNED, MAX_HITS, EN_STOP, CJK_STOP,
+  DEFAULT_LIMIT, MAX_LIMIT, MAX_PINNED, MAX_HITS, EN_STOP, CJK_STOP,
 };
