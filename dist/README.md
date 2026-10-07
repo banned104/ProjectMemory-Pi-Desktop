@@ -3,7 +3,10 @@
 | 文件 | 大小 | sha256 |
 |---|---|---|
 | `pi.project-memory-0.2.0.piplug` | 181,260 B | `1ad5eb9b14ec8a747ba43e51872481cd3f7360d651a6d08b0d32d503aabf9de5` |
-| `pi.project-memory-0.1.0.piplug` | 115,612 B | `383e95980043351b5fa9c556d301e530adedea3cafe8a141c3b554fa508adac8` |
+| `pi.project-memory-0.1.0.piplug` | 123,094 B | `ff736168269373eca164f4366f0474d2f75d9bb84c8ab417f002fb36ad4bb8f1` |
+
+表中数值即当前盘上文件。0.1.0 那行是修复高/中优先级缺陷之后重建的产物（提交 `8a152a3`），
+与首次打包时的字节不同。
 
 由宿主 `PluginPack` 生成（先跑 `PluginCheck`，两者均通过；唯一警告是高风险的
 `agent.tool.register` / `fs.write` / `fs.delete` 需用户显式授权）。
