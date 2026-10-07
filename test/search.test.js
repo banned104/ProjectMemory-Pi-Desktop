@@ -19,8 +19,9 @@ test('code words are no longer stop words', () => {
 
 test('real English function words produce no terms', () => {
   assert.deepEqual(core.termGroups('the and for with'), []);
-  // A short token is dropped as well.
-  assert.deepEqual(core.termGroups('ab'), []);
+  // Two-letter function words too, so that keeping `fs` and `id` searchable
+  // does not also admit `is` and `of`.
+  assert.deepEqual(core.termGroups('is of to at'), []);
 });
 
 test('a single CJK character is its own group', () => {
@@ -35,7 +36,7 @@ test('kana and hangul are tokenized, not silently dropped', () => {
 });
 
 test('an ASCII word and its snake/kebab parts form one group', () => {
-  assert.deepEqual(core.termGroups('readme.md'), [['readme.md', 'readme']]);
+  assert.deepEqual(core.termGroups('readme.md'), [['readme.md', 'readme', 'md']]);
 });
 
 // --- Matching --------------------------------------------------------------
@@ -159,4 +160,32 @@ test('toLoaded clips a long body and says where the rest is', () => {
   const loaded = core.toLoaded(entry);
   assert.match(loaded.body, /\[truncated: open .* for the rest\]/);
   assert.equal(loaded.source, entry.source);
+});
+
+test('two-character technical abbreviations form terms', () => {
+  // These are the highest-frequency words in a code knowledge base, and the
+  // old >= 3 length rule meant a query for any of them returned nothing.
+  for (const term of ['fs', 'db', 'id', 'ui', 'ts', 'py', 'go', 'ci']) {
+    assert.deepEqual(core.termGroups(term), [[term]], `"${term}" should produce one group`);
+  }
+  // A bare number is not a term, at any length.
+  assert.deepEqual(core.termGroups('42 2026'), []);
+});
+
+test('a document word is indexed whole and by its parts, like the query side', () => {
+  const entry = makeEntry({ title: 'config.json loader', summary: 'loads config.json at boot' });
+  // The index only kept `config.json`, so the query `config` — which does
+  // produce that spelling — found nothing.
+  assert.equal(core.search([entry], 'config').length, 1);
+  assert.equal(core.search([entry], 'config.json').length, 1);
+  assert.equal(core.search([entry], 'loader').length, 1);
+
+  const fs = makeEntry({ title: 'fs read helper', summary: 'wraps pi.fs' });
+  assert.equal(core.search([fs], 'fs').length, 1);
+  assert.equal(core.search([fs], 'read').length, 1);
+});
+
+test('whole-word matching still rejects a prefix of a longer word', () => {
+  const entry = makeEntry({ title: 'Knowledge base conventions', summary: 'About knowledge' });
+  assert.equal(core.search([entry], 'know').length, 0);
 });

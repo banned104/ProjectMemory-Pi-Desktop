@@ -23,7 +23,10 @@ const WORD_RE = /[a-z0-9][a-z0-9_.\-\/]*/g;
 const EN_STOP = new Set((
   'the and for are but not you all can had was one our out has how its may new now old see way who did get let say '
   + 'use this that with have from they been each make like just over such take than them very when what some time will into look only come '
-  + 'also back after work first well then your would there their which about could other these think should please again still why'
+  + 'also back after work first well then your would there their which about could other these think should please again still why '
+  // Two-letter function words, so that keeping `fs` and `id` searchable does
+  // not also admit `is` and `of`.
+  + 'of to in is it on at by or an as if be do we me my us he no so up'
 ).split(' '));
 
 /**
@@ -64,16 +67,31 @@ function termGroups(text) {
       continue;
     }
     const spellings = new Set();
-    if (token.length >= 3 && !EN_STOP.has(token)) spellings.add(token);
+    if (token.length >= 2 && !EN_STOP.has(token) && !/^\d+$/.test(token)) spellings.add(token);
     for (const part of token.split(/[_.\-\/]+/)) {
-      if (part.length >= 3 && !EN_STOP.has(part) && !/^\d+$/.test(part)) spellings.add(part);
+      if (part.length >= 2 && !EN_STOP.has(part) && !/^\d+$/.test(part)) spellings.add(part);
     }
     if (spellings.size && !groups.has(token)) groups.set(token, [...spellings]);
   }
   return [...groups.values()];
 }
 
-const wordTokens = value => normalize(value).match(WORD_RE) ?? [];
+/**
+ * Index a word and the parts it is spelled from, so a query for `config`
+ * reaches the entry that says `config.json`. The query side builds the same
+ * spelling set for a token; the original made the query side stricter than the
+ * index side in both directions, and whole classes of words matched nothing.
+ */
+function wordTokens(value) {
+  const words = [];
+  for (const token of normalize(value).match(WORD_RE) ?? []) {
+    words.push(token);
+    for (const part of token.split(/[_.\-\/]+/)) {
+      if (part && part !== token) words.push(part);
+    }
+  }
+  return words;
+}
 
 // --- Scoring ---------------------------------------------------------------
 
