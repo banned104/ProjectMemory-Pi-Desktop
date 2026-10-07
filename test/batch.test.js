@@ -515,3 +515,48 @@ test('describeResult reports each outcome and the warnings', () => {
   assert.match(lines[2], /1 skipped/);
   assert.equal(lines[3], 'careful');
 });
+
+test('describeResult says "nothing was saved" when nothing was', () => {
+  assert.deepEqual(core.describeResult({ saved: [], skipped: 0, warnings: [] }, 'en'), ['Nothing was saved']);
+  assert.deepEqual(core.describeResult({ saved: [], skipped: 0, warnings: [] }, 'zh-CN'), ['没有保存任何条目']);
+  // A save still reports first, and does not prepend an empty line.
+  const one = core.describeResult({
+    saved: [{ id: 'LSN-1', kind: 'lesson', title: 'A', action: 'create' }],
+    skipped: 0,
+    warnings: [],
+  }, 'en');
+  assert.equal(one.length, 1);
+  assert.match(one[0], /Saved \[lesson\]/);
+});
+
+test('a commit that saves nothing reports it, undecided or decided', async () => {
+  // Undecided: nothing is written and the batch stays pending.
+  const io = memoryIo({});
+  const batch = makeBatch([{ item: makeItem(), similar: [] }]);
+  const undecided = await core.commitBatch(io, batch, []);
+  assert.deepEqual(undecided.saved, []);
+  assert.equal(undecided.pending, 1);
+  const undecidedText = core.describeResult(undecided, 'en').join('\n');
+  assert.match(undecidedText, /Nothing was saved/);
+  assert.match(undecidedText, /1 item still without your decision/);
+
+  // Decided as "do not save".
+  const skipped = await core.commitBatch(io, batch, [{ index: 0, key: core.SKIP_KEY }]);
+  assert.deepEqual(skipped.saved, []);
+  assert.equal(skipped.skipped, 1);
+  assert.equal(skipped.pending, 0);
+  assert.equal(core.describeResult(skipped, 'en').join('\n'), 'Nothing was saved\n1 skipped');
+
+  // Decided as a duplicate of an existing entry.
+  const dupIo = memoryIo({
+    [`${MEMORY}/LSN-20260101-old.md`]: mdFile('LSN-20260101-old', { title: 'Alpha', body: 'body text' }),
+  });
+  const similar = await core.loadCorpus(dupIo.reader);
+  const dupBatch = makeBatch([{ item: makeItem(), similar }]);
+  const duplicate = await core.commitBatch(dupIo, dupBatch, [
+    { index: 0, key: dupBatch.items[0].options.find(option => option.action === 'duplicate').key },
+  ]);
+  assert.deepEqual(duplicate.saved, []);
+  assert.equal(duplicate.skipped, 1);
+  assert.match(core.describeResult(duplicate, 'en').join('\n'), /Nothing was saved/);
+});

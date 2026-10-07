@@ -414,12 +414,16 @@ async function commitBatch(io, batch, selections, options = {}) {
 }
 
 function describeResult(result, locale) {
-  const lines = result.saved.map(entry =>
+  // "Nothing was saved" is an outcome in its own right. Without it a single
+  // item chosen as "duplicate" reads as a bare "1 skipped", and the user is
+  // left wondering whether anything landed.
+  const lines = result.saved.length ? [] : [t(locale, 'nothingSaved')];
+  lines.push(...result.saved.map(entry =>
     entry.action === 'replace'
       ? t(locale, 'savedReplace', entry.id, entry.targetId)
       : entry.action === 'conflict'
         ? t(locale, 'savedConflict', entry.id, entry.targetId)
-        : t(locale, 'saved', entry.id, entry.kind, clip(entry.title, 80)));
+        : t(locale, 'saved', entry.id, entry.kind, clip(entry.title, 80))));
   if (result.skipped) lines.push(t(locale, 'notSaved', result.skipped));
   if (result.pending) lines.push(t(locale, 'pending', result.pending));
   return [...lines, ...result.warnings];

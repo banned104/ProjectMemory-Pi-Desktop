@@ -197,10 +197,14 @@
         }));
       act(async () => {
         const result = await bridge.invoke('inbox.commit', { batchId: commitId, selections });
-        const lines = result.saved.map(s => tr('saved', esc(s.id), esc(s.title)));
+        // "Nothing was saved" is an outcome in its own right: without it a
+        // batch whose items were all skipped reads as a bare "1 skipped".
+        const lines = result.saved.length
+          ? result.saved.map(s => tr('saved', esc(s.id), esc(s.title)))
+          : [esc(tr('nothing'))];
         if (result.skipped) lines.push(esc(tr('skipped', result.skipped)));
         if (result.pending) lines.push(esc(tr('pending', result.pending)));
-        show('result', lines.concat(result.warnings.map(esc)).join('<br>') || esc(tr('nothing')));
+        show('result', lines.concat(result.warnings.map(esc)).join('<br>'));
       });
     } else if (discardId) {
       act(async () => {
