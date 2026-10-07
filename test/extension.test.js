@@ -248,7 +248,7 @@ test('the card handler ignores anything that is not an answered asktool call', a
   assert.deepEqual([...io.files.keys()].filter(p => p.startsWith(`${MEMORY}/`)), [], 'nothing may be written');
 });
 
-test('an unanswered card writes nothing and says so', async () => {
+test('an unanswered card writes nothing and keeps the batch', async () => {
   const io = memoryIo({});
   const item = core.validateItems([{ kind: 'lesson', title: 'Alpha', content: 'detail', keywords: [] }])[0];
   const batch = await pendingBatch(io, [item]);
@@ -261,7 +261,38 @@ test('an unanswered card writes nothing and says so', async () => {
   }, ctx(), { io });
 
   assert.deepEqual([...io.files.keys()].filter(p => p.startsWith(`${MEMORY}/`)), []);
+  assert.ok(io.files.has(core.batchPath(batch.id)), 'the suggestion is kept for later');
   assert.match(result.content[0].text, /left unanswered/);
+});
+
+test('a free-text answer is not a confirmation and writes nothing', async () => {
+  const io = memoryIo({});
+  const item = core.validateItems([{ kind: 'lesson', title: 'Alpha', content: 'detail', keywords: [] }])[0];
+  const batch = await pendingBatch(io, [item]);
+  const { questions } = core.askToolArgs(batch);
+
+  const result = await onToolResult({
+    toolName: 'asktool', isError: false,
+    details: { questions, answers: [['save everything please']] },
+    content: [],
+  }, ctx(), { io });
+
+  assert.deepEqual([...io.files.keys()].filter(p => p.startsWith(`${MEMORY}/`)), []);
+  assert.ok(io.files.has(core.batchPath(batch.id)), 'the batch survives: no option was picked');
+  assert.match(result.content[0].text, /still without your decision/);
+});
+
+test('an empty or short answer list is not treated as answered', async () => {
+  const io = memoryIo({});
+  const item = core.validateItems([{ kind: 'lesson', title: 'Alpha', content: 'detail', keywords: [] }])[0];
+  const batch = await pendingBatch(io, [item]);
+  const { questions } = core.askToolArgs(batch);
+
+  for (const answers of [[], [undefined], [[]]]) {
+    await onToolResult({ toolName: 'asktool', isError: false, details: { questions, answers }, content: [] }, ctx(), { io });
+    assert.deepEqual([...io.files.keys()].filter(p => p.startsWith(`${MEMORY}/`)), [], `nothing written for ${JSON.stringify(answers)}`);
+    assert.ok(io.files.has(core.batchPath(batch.id)), `batch kept for ${JSON.stringify(answers)}`);
+  }
 });
 
 test('a marker with no matching batch is reported, not written', async () => {

@@ -193,7 +193,8 @@ function askToolArgs(batch) {
 
 /**
  * Map genuine asktool answers back to selections. Only options this plugin
- * generated count; a typed-in answer or an unanswered question saves nothing.
+ * generated count. An explicit "do not save" is recorded as a verdict; a
+ * typed-in answer or an unanswered question leaves that item undecided.
  */
 function selectionsFromAnswers(batch, questions, answers) {
   const selections = [];
@@ -214,7 +215,8 @@ function selectionsFromAnswers(batch, questions, answers) {
       notes.push(t(batch.locale, 'notAnOption', sanitize(item.title, MAX_TITLE), sanitize(String(answer[0]), 40)));
       return;
     }
-    if (choice.key === SKIP_KEY) return;
+    // "Do not save" is still a verdict and is recorded as one. Only a free-text
+    // answer or an unanswered question leaves the item undecided.
     selections.push({ index: itemIndex, key: choice.key });
   });
   return { selections, notes };
@@ -276,7 +278,8 @@ async function retireBatch(io, batch, result) {
 
 /**
  * Validate every selection first; write only when the whole commit is valid.
- * Unselected items are skipped.
+ * An item without a verdict — not selected at all, or answered with free text —
+ * is left pending: the batch is retired only once every item has been decided.
  *
  * Idempotency does not depend on the inbox write succeeding: every entry this
  * batch wrote carries `batchRef`, so a retry finds what already landed and
@@ -301,6 +304,7 @@ async function commitBatch(io, batch, selections, options = {}) {
     if (!item || seen.has(selection.index)) throw new Error('invalid selection');
     seen.add(selection.index);
     if (item.savedAs) continue;
+    if (selection.key === SKIP_KEY) continue;
     const option = item.options.find(candidate => candidate.key === selection.key);
     if (!option) throw new Error(t(locale, 'invalidAction', sanitize(item.title, MAX_TITLE)));
     if (option.action === 'duplicate') continue;
@@ -386,12 +390,16 @@ async function commitBatch(io, batch, selections, options = {}) {
     throw error;
   }
 
+  // Every item falls into exactly one of: written, decided but not written, or
+  // still undecided. Only a batch with nothing left undecided is finished.
+  const pending = batch.items.filter((item, index) => !item.savedAs && !seen.has(index)).length;
   const result = {
     saved,
-    skipped: batch.items.filter(item => !item.savedAs).length,
+    skipped: batch.items.length - saved.length - pending,
+    pending,
     warnings,
   };
-  await retireBatch(io, batch, result);
+  if (!pending) await retireBatch(io, batch, result);
   return result;
 }
 
@@ -403,6 +411,7 @@ function describeResult(result, locale) {
         ? t(locale, 'savedConflict', entry.id, entry.targetId)
         : t(locale, 'saved', entry.id, entry.kind, clip(entry.title, 80)));
   if (result.skipped) lines.push(t(locale, 'notSaved', result.skipped));
+  if (result.pending) lines.push(t(locale, 'pending', result.pending));
   return [...lines, ...result.warnings];
 }
 

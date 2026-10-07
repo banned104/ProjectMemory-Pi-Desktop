@@ -75,7 +75,8 @@
       expand: n => `展开内容${n ? `与 ${n} 条相似条目` : ''}`,
       batch: n => `建议沉淀 ${n} 条`, discard: '全部跳过', commit: '保存所选',
       saved: (id, title) => `已保存 <b>${id}</b> ${title}`,
-      skipped: n => `跳过 ${n} 条`, nothing: '没有保存任何条目',
+      skipped: n => `跳过 ${n} 条`, pending: n => `${n} 条未作答，已保留在列表中`,
+      nothing: '没有保存任何条目',
       discarded: '已全部跳过，未写入任何记忆。',
       kinds: { lesson: '经验', rule: '规则', decision: '决策', procedure: '步骤', map: '项目地图', preference: '偏好' },
     },
@@ -86,7 +87,8 @@
       expand: n => `Show content${n ? ` and ${n} similar entr${n === 1 ? 'y' : 'ies'}` : ''}`,
       batch: n => `${n} proposed item${n === 1 ? '' : 's'}`, discard: 'Skip all', commit: 'Save selected',
       saved: (id, title) => `Saved <b>${id}</b> ${title}`,
-      skipped: n => `${n} skipped`, nothing: 'Nothing was saved',
+      skipped: n => `${n} skipped`, pending: n => `${n} undecided, kept in the list`,
+      nothing: 'Nothing was saved',
       discarded: 'Skipped all; nothing was written.',
       kinds: { lesson: 'lesson', rule: 'rule', decision: 'decision', procedure: 'howto', map: 'map', preference: 'pref' },
     },
@@ -183,16 +185,21 @@
     const discardId = event.target.getAttribute?.('data-discard');
     if (commitId) {
       const section = event.target.closest('section');
+      // Every item gets a verdict: an unchecked box means "do not save", the
+      // same choice as on the card. That is what tells the backend the user
+      // actually went through the batch; nothing else retires it.
       const selections = [...section.querySelectorAll('input[type=checkbox]')]
-        .filter(box => box.checked)
         .map(box => ({
           index: Number(box.dataset.index),
-          key: section.querySelector(`select[data-index="${box.dataset.index}"]`).value,
+          key: box.checked
+            ? section.querySelector(`select[data-index="${box.dataset.index}"]`).value
+            : 'skip',
         }));
       act(async () => {
         const result = await bridge.invoke('inbox.commit', { batchId: commitId, selections });
         const lines = result.saved.map(s => tr('saved', esc(s.id), esc(s.title)));
         if (result.skipped) lines.push(esc(tr('skipped', result.skipped)));
+        if (result.pending) lines.push(esc(tr('pending', result.pending)));
         show('result', lines.concat(result.warnings.map(esc)).join('<br>') || esc(tr('nothing')));
       });
     } else if (discardId) {

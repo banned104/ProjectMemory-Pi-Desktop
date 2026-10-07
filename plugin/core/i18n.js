@@ -35,6 +35,7 @@ const MESSAGES = {
     savedReplace: (id, old) => `已保存 ${id}，${old} 标记为已弃用`,
     savedConflict: (id, other) => `已保存 ${id}，与 ${other} 互相关联`,
     notSaved: n => `跳过 ${n} 条`,
+    pending: n => `${n} 条还没有你的决定，保留在待确认列表`,
     nothingSaved: '没有保存任何条目',
 
     backlinkFailed: (id, target, message) => `${id} 已保存，但回链 ${target} 失败：${message}`,
@@ -85,6 +86,7 @@ const MESSAGES = {
     savedReplace: (id, old) => `Saved ${id}; ${old} marked deprecated`,
     savedConflict: (id, other) => `Saved ${id}; linked with ${other}`,
     notSaved: n => `${n} skipped`,
+    pending: n => `${n} item${n === 1 ? '' : 's'} still without your decision; kept in the pending list`,
     nothingSaved: 'Nothing was saved',
 
     backlinkFailed: (id, target, message) => `${id} was saved, but linking back to ${target} failed: ${message}`,

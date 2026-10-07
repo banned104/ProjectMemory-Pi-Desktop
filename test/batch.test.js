@@ -117,12 +117,12 @@ test('selectionsFromAnswers maps labels back to option keys', () => {
   assert.deepEqual(notes, []);
 });
 
-test('a skipped, unanswered or unrecognised answer saves nothing', () => {
+test('an explicit "do not save" is a verdict; free text or silence is not', () => {
   const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
   const { questions } = core.askToolArgs(batch);
 
   const skipped = core.selectionsFromAnswers(batch, questions, [[core.t('en', 'skip')]]);
-  assert.deepEqual(skipped.selections, []);
+  assert.deepEqual(skipped.selections, [{ index: 0, key: core.SKIP_KEY }]);
   assert.deepEqual(skipped.notes, []);
 
   const unanswered = core.selectionsFromAnswers(batch, questions, [null]);
@@ -251,6 +251,85 @@ test('commit rejects an unknown option and a target that is gone', async () => {
 
   batch.items[0].options.push({ key: 'replace:GONE', action: 'replace', targetId: 'GONE', label: 'x' });
   await assert.rejects(() => core.commitBatch(io, batch, [{ index: 0, key: 'replace:GONE' }]), /gone or retired/);
+});
+
+// --- Deciding every item ---------------------------------------------------
+// A batch is only finished when every item has been decided. Anything else
+// leaves the suggestion on disk: the user has not spoken yet.
+
+test('a batch with no verdict at all is kept pending, not retired', async () => {
+  const io = memoryIo({});
+  const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
+  await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
+
+  const result = await core.commitBatch(io, batch, []);
+
+  assert.deepEqual(result.saved, []);
+  assert.equal(result.skipped, 0);
+  assert.equal(result.pending, 1);
+  assert.ok(io.files.has(core.batchPath(batch.id)), 'nothing was decided, so the batch stays');
+  assert.match(core.describeResult(result, 'en').join('\n'), /1 item still without your decision/);
+});
+
+test('an answer that matches no option keeps the batch pending', async () => {
+  const io = memoryIo({});
+  const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
+  await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
+  const { questions } = core.askToolArgs(batch);
+
+  const { selections, notes } = core.selectionsFromAnswers(batch, questions, [['save everything please']]);
+  const result = await core.commitBatch(io, batch, selections);
+
+  assert.equal(notes.length, 1);
+  assert.equal(result.saved.length, 0);
+  assert.equal(result.pending, 1);
+  assert.ok(io.files.has(core.batchPath(batch.id)), 'the user never chose, so the suggestion is kept');
+});
+
+test('deciding every item, including "do not save", finishes the batch', async () => {
+  const io = memoryIo({});
+  const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
+  await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
+  const { questions } = core.askToolArgs(batch);
+
+  const { selections } = core.selectionsFromAnswers(batch, questions, [[core.t('en', 'skip')]]);
+  const result = await core.commitBatch(io, batch, selections);
+
+  assert.equal(result.pending, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(io.files.has(core.batchPath(batch.id)), false);
+});
+
+test('a partially decided batch saves what was chosen and keeps the rest', async () => {
+  const io = memoryIo({});
+  const batch = makeBatch([
+    { item: makeItem({ title: 'Alpha', content: 'first' }), similar: [] },
+    { item: makeItem({ title: 'Beta', content: 'second' }), similar: [] },
+  ]);
+  await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
+
+  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'create' }]);
+
+  assert.equal(result.saved.length, 1);
+  assert.equal(result.pending, 1);
+  assert.equal(result.skipped, 0);
+  assert.ok(io.files.has(core.batchPath(batch.id)), 'the second item is still undecided');
+});
+
+test('a duplicate verdict is a decision, not a pending item', async () => {
+  const source = `${MEMORY}/LSN-20260101-old.md`;
+  const io = memoryIo({ [source]: mdFile('LSN-20260101-old', { title: 'Alpha' }) });
+  const batch = makeBatch([{
+    item: makeItem({ title: 'Alpha' }),
+    similar: [core.parseEntry(source, io.files.get(source))],
+  }]);
+  await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
+
+  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'duplicate:LSN-20260101-old' }]);
+
+  assert.equal(result.pending, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(io.files.has(core.batchPath(batch.id)), false);
 });
 
 // --- The idempotency guarantee ---------------------------------------------
