@@ -170,8 +170,14 @@ function renderEntry({ id, kind, title, keywords, content, created, pinned, batc
 function setFrontmatterFields(raw, fields) {
   const rendered = Object.entries(fields)
     .map(([key, value]) => `${key}: ${Array.isArray(value) ? yamlList(value) : yamlString(value)}`);
-  const match = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(String(raw ?? ''));
-  if (!match) return `---\n${rendered.join('\n')}\n---\n\n${raw}`;
+  // Keep the file's BOM, but match past it. Without that a BOM file takes the
+  // fallback branch and the entry is rewritten behind a second frontmatter
+  // block, which permanently scrambles its title and kind.
+  const source = String(raw ?? '');
+  const bom = source.startsWith('\uFEFF') ? '\uFEFF' : '';
+  const text = bom ? source.slice(1) : source;
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(text);
+  if (!match) return `${bom}---\n${rendered.join('\n')}\n---\n\n${text}`;
   const kept = [];
   let skipping = false;
   for (const line of match[1].split(/\r?\n/)) {
@@ -180,7 +186,7 @@ function setFrontmatterFields(raw, fields) {
     else if (!/^\s+-\s+/.test(line) && line.trim()) skipping = false;
     if (!skipping) kept.push(line);
   }
-  return `---\n${[...kept, ...rendered].join('\n')}\n---${match[2] || '\n'}${String(raw ?? '').slice(match[0].length)}`;
+  return `${bom}---\n${[...kept, ...rendered].join('\n')}\n---${match[2] || '\n'}${text.slice(match[0].length)}`;
 }
 
 module.exports = {

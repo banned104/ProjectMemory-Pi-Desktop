@@ -142,7 +142,10 @@ function yamlScalar(raw) {
  * left in the body rather than half-parsed.
  */
 function parseFrontmatter(raw) {
-  const text = String(raw ?? '');
+  // A BOM is not content: Windows editors add one to .md files, and without
+  // this the whole block falls through to the body, which silently degrades
+  // the entry to its filename and its first line.
+  const text = String(raw ?? '').replace(/^\uFEFF/, '');
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
   if (!match) return { data: {}, body: text };
   const data = {};

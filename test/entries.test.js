@@ -206,3 +206,40 @@ test('setFrontmatterFields replaces a scalar and drops a replaced block list', (
   assert.match(next, /^---\n/);
   assert.match(next, /\n---\nbody$/);
 });
+
+test('a BOM in front of the frontmatter is not content', () => {
+  const raw = '\uFEFF' + [
+    '---', 'id: "RUL-20260101-keep"', 'kind: rule', 'title: "Keep this rule"',
+    'keywords: [a, b]', '---', '', 'Body',
+  ].join('\n');
+  const entry = core.parseEntry(`${MEMORY}/RUL-20260101-keep.md`, raw);
+  // Without BOM tolerance this whole block was read as body: the id fell back
+  // to the filename, the kind silently became `lesson`, and the title was the
+  // literal line `id: "RUL-20260101-keep"`.
+  assert.equal(entry.id, 'RUL-20260101-keep');
+  assert.equal(entry.kind, 'rule');
+  assert.equal(entry.title, 'Keep this rule');
+  assert.deepEqual(entry.keywords, ['a', 'b']);
+  assert.equal(entry.body, 'Body');
+});
+
+test('setFrontmatterFields keeps a BOM and rewrites the existing block', () => {
+  const raw = '\uFEFF' + [
+    '---', 'id: "LSN-20260101-x"', 'kind: lesson', 'title: "X"', 'status: active', '---', '', 'body',
+  ].join('\r\n');
+  const next = core.setFrontmatterFields(raw, { status: 'deprecated', supersededBy: 'LSN-NEW' });
+  assert.ok(next.startsWith('\uFEFF---'), 'the BOM is preserved on write');
+  // Exactly one frontmatter block. The old fallback branch prepended a second
+  // one, and the entry's title and kind were lost behind it forever.
+  assert.equal((next.replace(/^\uFEFF/, '').match(/^---\r?$/gm) ?? []).length, 2);
+  assert.match(next, /status: "deprecated"/);
+  assert.match(next, /supersededBy: "LSN-NEW"/);
+  assert.match(next, /title: "X"/);
+
+  const entry = core.parseEntry(`${MEMORY}/LSN-20260101-x.md`, next);
+  assert.equal(entry.title, 'X');
+  assert.equal(entry.kind, 'lesson');
+  assert.equal(entry.status, 'deprecated');
+  assert.equal(entry.supersededBy, 'LSN-NEW');
+  assert.equal(entry.body, 'body');
+});
