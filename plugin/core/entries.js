@@ -99,6 +99,7 @@ function parseEntry(source, raw) {
     body: text,
     source,
     created: typeof data.created === 'string' ? data.created : '',
+    updated: typeof data.updated === 'string' ? data.updated : '',
     related: asList(data.related),
     supersededBy: typeof data.supersededBy === 'string' && data.supersededBy.trim()
       ? data.supersededBy.trim()
@@ -168,8 +169,9 @@ function renderEntry({ id, kind, title, keywords, content, created, pinned, batc
  * arrays inline; an existing block list under a replaced key is removed.
  */
 function setFrontmatterFields(raw, fields) {
+  const scalar = value => (typeof value === 'boolean' ? String(value) : yamlString(value));
   const rendered = Object.entries(fields)
-    .map(([key, value]) => `${key}: ${Array.isArray(value) ? yamlList(value) : yamlString(value)}`);
+    .map(([key, value]) => `${key}: ${Array.isArray(value) ? yamlList(value) : scalar(value)}`);
   // Keep the file's BOM, but match past it. Without that a BOM file takes the
   // fallback branch and the entry is rewritten behind a second frontmatter
   // block, which permanently scrambles its title and kind.
@@ -189,9 +191,34 @@ function setFrontmatterFields(raw, fields) {
   return `${bom}---\n${[...kept, ...rendered].join('\n')}\n---${match[2] || '\n'}${text.slice(match[0].length)}`;
 }
 
+/**
+ * Replace everything after the closing `---`, keeping the frontmatter block and
+ * any BOM byte for byte. Used when the user edits an entry body in the view.
+ */
+function setEntryBody(raw, body) {
+  const source = String(raw ?? '');
+  const bom = source.startsWith('\uFEFF') ? '\uFEFF' : '';
+  const text = bom ? source.slice(1) : source;
+  const match = /^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/.exec(text);
+  const head = (match ? match[0] : '---\n\n').replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
+  return `${bom}${head}\n${String(body ?? '').trim()}\n`;
+}
+
+/**
+ * Apply one view edit: frontmatter fields first, then the body. Both helpers
+ * preserve the BOM and the block boundaries, so the order cannot re-open the
+ * frontmatter and put the body inside it.
+ */
+function rewriteEntry(raw, { fields = {}, body } = {}) {
+  const withFields = Object.keys(fields).length
+    ? setFrontmatterFields(raw, fields)
+    : String(raw ?? '');
+  return body === undefined ? withFields : setEntryBody(withFields, body);
+}
+
 module.exports = {
   MEMORY_DIR, INBOX_DIR, MAP_ID, KINDS, KIND_PREFIX, KIND_TAG, INACTIVE, ID_PATTERN,
   MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES, MATCH_BODY_CHARS, MAX_LOAD_CHARS,
   isMissing, isActive, slug, localDate, newEntryId, parseEntry, loadCorpus,
-  renderEntry, setFrontmatterFields,
+  renderEntry, setFrontmatterFields, setEntryBody, rewriteEntry,
 };
