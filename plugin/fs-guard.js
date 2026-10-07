@@ -11,9 +11,12 @@
 //   - anchors on the project's real path, pinned once per session. The pin
 //     records the root directory's dev/ino; each operation re-checks, before
 //     and after, that the path still resolves to that same directory, so a root
-//     swapped between operations is refused. Opening the project through a
-//     symlinked path is allowed (that is the user's choice); links inside the
-//     project's content are not.
+//     swapped between operations is refused. The pin lives on the instance this
+//     factory returns, so the caller must reuse one instance per session:
+//     building a fresh one per call re-anchors on the current path and quietly
+//     gives up this guarantee. Opening the project through a symlinked path is
+//     allowed (that is the user's choice); links inside the project's content
+//     are not.
 //   - refuses a symbolic link at ANY component below the anchor, including the
 //     start directories `.workflow`, `.workflow/memory`.
 //   - re-resolves the result and requires it to stay inside the project.

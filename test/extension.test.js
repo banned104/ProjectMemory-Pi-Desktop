@@ -2,12 +2,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fsp = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 
 const core = require('../plugin/core/index.js');
 const extension = require('../plugin/extension.js');
 const { memoryIo, mdFile, MEMORY, INBOX } = require('./helpers.js');
 
-const { promptTurns, turnKeys, onProviderRequest, onBeforeAgentStart, onToolResult, retrieve, injections } = extension._internals;
+const { promptTurns, turnKeys, onProviderRequest, onBeforeAgentStart, onToolResult, retrieve, nodeIo, injections } = extension._internals;
 
 const BATCH_ID = 'KB-11111111-2222-3333-4444-555555555555';
 const CWD = '/project';
@@ -318,6 +321,49 @@ test('a recognised card in Chinese is answered in Chinese', async () => {
     content: [],
   }, ctx(), { io });
   assert.match(result.content[0].text, /项目记忆：/);
+});
+
+// --- The project root pin --------------------------------------------------
+
+test('one project fs per session, so the pin survives hook calls', () => {
+  const first = nodeIo('/tmp/pm-a', 's1');
+  assert.equal(nodeIo('/tmp/pm-a', 's1'), first, 'the same session reuses the instance that holds the pin');
+  assert.notEqual(nodeIo('/tmp/pm-a', 's2'), first, 'another session is pinned separately');
+  assert.notEqual(nodeIo('/tmp/pm-b', 's1'), first, 'another project is pinned separately');
+});
+
+test('a project root replaced mid-session is refused, not adopted', async t => {
+  const root = path.join(os.tmpdir(), `pm-root-${process.pid}-${Date.now()}`);
+  const moved = `${root}-moved`;
+  t.after(() => Promise.all([
+    fsp.rm(root, { recursive: true, force: true }),
+    fsp.rm(moved, { recursive: true, force: true }),
+  ]));
+
+  await fsp.mkdir(path.join(root, '.workflow', 'memory'), { recursive: true });
+  await fsp.writeFile(
+    path.join(root, '.workflow', 'memory', 'LSN-20260101-alpha.md'),
+    mdFile('LSN-20260101-alpha', { title: 'Alpha lesson' }),
+  );
+
+  // The first call is what anchors the root.
+  const first = await retrieve(root, 'alpha lesson', null, 's1');
+  assert.ok(first.ids.includes('LSN-20260101-alpha'));
+
+  // Same path, a different directory underneath: a worktree swap, a rebuilt
+  // checkout, anything that re-creates the project folder.
+  await fsp.rename(root, moved);
+  await fsp.mkdir(path.join(root, '.workflow', 'memory'), { recursive: true });
+  await fsp.writeFile(
+    path.join(root, '.workflow', 'memory', 'LSN-20260101-beta.md'),
+    mdFile('LSN-20260101-beta', { title: 'Beta lesson' }),
+  );
+
+  await assert.rejects(
+    () => retrieve(root, 'beta lesson', null, 's1'),
+    /project root changed/,
+    'the replacement must not be read as this project',
+  );
 });
 
 // --- The extension entry point --------------------------------------------

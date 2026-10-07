@@ -124,7 +124,27 @@ const sessionIdOf = ctx => {
   try { return ctx?.sessionManager?.getSessionId?.() ?? undefined; } catch { return undefined; }
 };
 
-const nodeIo = (root, sessionId) => createProjectFs(root, sessionId);
+/**
+ * One project fs per session, kept for the life of the extension.
+ *
+ * The root pin lives on the `createProjectFs` instance. Building a fresh one
+ * per call would re-anchor on whatever the path resolves to *now*, so a
+ * project root replaced mid-session would be silently accepted and both the
+ * reads and the confirmed writes would land in the replacement. `session_start`
+ * must therefore pin through the same instance every later hook uses.
+ */
+const MAX_IO = 200;
+const projectIo = new Map();
+function nodeIo(root, sessionId) {
+  const key = `${sessionId ?? ''}\u0000${root}`;
+  let io = projectIo.get(key);
+  if (!io) {
+    io = createProjectFs(root, sessionId);
+    projectIo.set(key, io);
+    while (projectIo.size > MAX_IO) projectIo.delete(projectIo.keys().next().value);
+  }
+  return io;
+}
 
 /**
  * Pinned entries are orientation and go in regardless of the query; retrieved
@@ -251,10 +271,11 @@ async function onToolResult(event, ctx, deps = {}) {
 }
 
 module.exports = function projectMemoryExtension(pi) {
-  // Fix the session's real project root before anything is read.
+  // Fix the session's real project root before anything is read. It goes
+  // through the shared instance, so this is the pin the later hooks check.
   pi.on('session_start', async (_event, ctx) => {
     if (typeof ctx?.cwd === 'string' && ctx.cwd) {
-      await createProjectFs(ctx.cwd, sessionIdOf(ctx)).exists('.workflow').catch(() => {});
+      await nodeIo(ctx.cwd, sessionIdOf(ctx)).exists('.workflow').catch(() => {});
     }
   });
   pi.on('before_provider_request', (event, ctx) => onProviderRequest(event, ctx));
