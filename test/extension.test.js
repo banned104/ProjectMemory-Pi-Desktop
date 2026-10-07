@@ -10,7 +10,7 @@ const core = require('../plugin/core/index.js');
 const extension = require('../plugin/extension.js');
 const { memoryIo, mdFile, MEMORY, INBOX } = require('./helpers.js');
 
-const { promptTurns, turnKeys, onProviderRequest, onBeforeAgentStart, onToolResult, retrieve, nodeIo, injections } = extension._internals;
+const { promptTurns, turnKeys, onProviderRequest, onBeforeAgentStart, onToolResult, retrieve, nodeIo, injections, cardLocaleOf } = extension._internals;
 
 const BATCH_ID = 'KB-11111111-2222-3333-4444-555555555555';
 const CWD = '/project';
@@ -372,4 +372,65 @@ test('the factory registers exactly the four hooks it needs', () => {
   const registered = [];
   extension({ on: (event) => registered.push(event) });
   assert.deepEqual(registered, ['session_start', 'before_provider_request', 'before_agent_start', 'tool_result']);
+});
+
+test('cardLocaleOf reads the language off the question itself', () => {
+  const build = (locale, title) => core.askToolArgs(core.buildBatch({
+    prepared: [{ item: core.validateItems([{ kind: 'lesson', title, content: 'detail', keywords: [] }])[0], similar: [] }],
+    locale,
+    id: BATCH_ID,
+  })).questions[0];
+
+  // The title is chosen to carry the *opposite* punctuation, which is exactly
+  // what the old whole-text check got wrong: it looked for a string that does
+  // not exist anywhere in the repository and always answered in English.
+  assert.equal(cardLocaleOf(build('en', '标题里有全角冒号：看这里')), 'en');
+  assert.equal(cardLocaleOf(build('zh-CN', 'colon: in the title')), 'zh-CN');
+  // A question that is not ours at all falls back to English.
+  assert.equal(cardLocaleOf({ question: '[PM deadbeef 1/1] ghost' }), 'en');
+  assert.equal(cardLocaleOf(undefined), 'en');
+});
+
+test('a missing batch is reported in the language of the card', async () => {
+  const io = memoryIo({});
+  const ask = question => onToolResult({
+    toolName: 'asktool', isError: false,
+    details: { questions: [{ question, options: [] }], answers: [['x']] },
+    content: [],
+  }, ctx(), { io });
+
+  const zh = await ask('[PM deadbeef 1/1] 经验：Alpha（备注）');
+  assert.match(zh.content[0].text, /项目记忆：/);
+  assert.match(zh.content[0].text, /找不到对应的待确认批次/);
+
+  const en = await ask('[PM deadbeef 1/1] lesson: Alpha (note)');
+  assert.match(en.content[0].text, /Project memory:/);
+  assert.match(en.content[0].text, /no pending batch matches/);
+});
+
+test('one card carrying two batches reports each in its own language', async () => {
+  const io = memoryIo({});
+  const build = (locale, id, title) => core.buildBatch({
+    prepared: [{ item: core.validateItems([{ kind: 'lesson', title, content: 'detail', keywords: [] }])[0], similar: [] }],
+    locale,
+    id,
+  });
+  const en = build('en', 'KB-11111111-2222-3333-4444-555555555555', 'Alpha');
+  const zh = build('zh-CN', 'KB-22222222-2222-3333-4444-555555555555', 'Beta');
+  await io.writeText(core.batchPath(en.id), JSON.stringify(en));
+  await io.writeText(core.batchPath(zh.id), JSON.stringify(zh));
+
+  const result = await onToolResult({
+    toolName: 'asktool', isError: false,
+    details: {
+      questions: [core.askToolArgs(en).questions[0], core.askToolArgs(zh).questions[0]],
+      answers: [[en.items[0].ask[0].label], [zh.items[0].ask[0].label]],
+    },
+    content: [],
+  }, ctx(), { io });
+
+  const text = result.content[0].text;
+  assert.match(text, /Saved \[lesson\]/);
+  assert.match(text, /已保存 \[lesson\]/);
+  assert.match(text, /项目记忆：/);
 });

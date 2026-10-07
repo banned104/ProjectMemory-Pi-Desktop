@@ -218,6 +218,19 @@ function onBeforeAgentStart(event) {
   return { systemPrompt: `${event.systemPrompt}${GUIDANCE}` };
 }
 
+/**
+ * Which language a card question was rendered in, read off that question's own
+ * wording. The zh template separates the kind tag from the title with a
+ * full-width colon, the en template with a half-width one, and everything up
+ * to that separator is template-generated. A title may contain either
+ * punctuation, so only the head counts.
+ */
+function cardLocaleOf(question) {
+  const text = String(question?.question ?? '');
+  const head = /^[^:：]*[:：]/.exec(text)?.[0] ?? '';
+  return head.includes('：') ? 'zh-CN' : 'en';
+}
+
 async function onToolResult(event, ctx, deps = {}) {
   if (event?.toolName !== ASK_TOOL || event.isError) return undefined;
   const questions = event.details?.questions ?? event.input?.questions;
@@ -229,24 +242,28 @@ async function onToolResult(event, ctx, deps = {}) {
   if (!refs.length || typeof ctx?.cwd !== 'string' || !ctx.cwd) return undefined;
 
   const io = deps.io ?? nodeIo(ctx.cwd, sessionIdOf(ctx));
-  // The card's own wording tells which language the user saw, even when the batch is gone.
-  const cardLocale = /保存记忆「/.test(String(questions[0]?.question ?? '')) ? 'zh-CN' : 'en';
-  let reportLocale = cardLocale;
+  // The card's own wording tells which language the user saw, even when the
+  // batch is gone.
+  let reportLocale = cardLocaleOf(questions[0]);
   const reports = [];
 
   for (const ref of refs) {
+    const own = questions
+      .map((question, i) => [question, answers[i]])
+      .filter(([question]) => core.ASK_MARKER.exec(String(question?.question ?? ''))?.[1] === ref);
+    // Per question, not per call: one card can carry batches of different
+    // locales, and the "no such batch" case has no batch to ask.
+    let locale = cardLocaleOf(own[0]?.[0]);
     try {
       const batch = (await core.listBatches(io)).find(candidate => candidate.ref === ref);
       if (!batch) {
-        reports.push(core.t(cardLocale, 'reportNotFound', ref));
+        reports.push(core.t(locale, 'reportNotFound', ref));
         continue;
       }
+      locale = batch.locale;
       reportLocale = batch.locale;
-      const own = questions
-        .map((question, i) => [question, answers[i]])
-        .filter(([question]) => core.ASK_MARKER.exec(String(question?.question ?? ''))?.[1] === ref);
       if (own.every(([, answer]) => answer === null)) {
-        reports.push(core.t(batch.locale, 'reportUnanswered', ref));
+        reports.push(core.t(locale, 'reportUnanswered', ref));
         continue;
       }
       if (committing.has(batch.id)) {
@@ -262,7 +279,7 @@ async function onToolResult(event, ctx, deps = {}) {
         committing.delete(batch.id);
       }
     } catch (error) {
-      reports.push(core.t(reportLocale, 'reportFailed', ref, core.sanitize(String(error?.message ?? error), 200)));
+      reports.push(core.t(locale, 'reportFailed', ref, core.sanitize(String(error?.message ?? error), 200)));
     }
   }
 
@@ -285,5 +302,5 @@ module.exports = function projectMemoryExtension(pi) {
 
 module.exports._internals = {
   onProviderRequest, onBeforeAgentStart, onToolResult, retrieve,
-  promptTurns, appendBlock, turnKeys, nodeIo, injections, GUIDANCE, tool, TOOL_PREFIX,
+  promptTurns, appendBlock, turnKeys, nodeIo, injections, GUIDANCE, tool, TOOL_PREFIX, cardLocaleOf,
 };
