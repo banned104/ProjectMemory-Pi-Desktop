@@ -51,6 +51,31 @@ test('parseFrontmatter leaves a body without frontmatter untouched', () => {
   assert.deepEqual(data, {});
   assert.equal(body, 'just a body');
 });
+test('yamlScalar keeps commas inside the values of an inline list', () => {
+  // Our own writer emits a JSON array, so a keyword like `v1, v2` is quoted on
+  // the way out and must come back intact. `split(',')` used to shred it.
+  const keywords = ['v1, v2', 'fs, path', 'plain'];
+  const rendered = text.yamlList(keywords);
+  assert.equal(rendered, '["v1, v2", "fs, path", "plain"]');
+  assert.deepEqual(text.yamlScalar(rendered), keywords);
+
+  // A hand-written unquoted list behaves exactly as before.
+  assert.deepEqual(text.yamlScalar('[a, b]'), ['a', 'b']);
+  assert.deepEqual(text.yamlScalar('[a,,b]'), ['a', '', 'b']);
+  assert.deepEqual(text.yamlScalar('[]'), []);
+
+  // Escaped quotes inside a JSON string survive, and so does the '' escape of
+  // a single-quoted YAML value.
+  assert.deepEqual(text.yamlScalar('["say \\"hi\\", now"]'), ['say "hi", now']);
+  assert.deepEqual(text.yamlScalar("['a,b', 'it''s']"), ['a,b', "it's"]);
+
+  // An unterminated quote keeps its text as written; a hand-edited file must
+  // still load rather than throw.
+  assert.deepEqual(text.yamlScalar('["a, b", "c]'), ['a, b', '"c']);
+  // Without a closing bracket the value is a scalar, exactly as before.
+  assert.equal(text.yamlScalar('["a, b'), '["a, b');
+});
+
 
 test('asList accepts arrays and comma strings, drops blanks', () => {
   assert.deepEqual(text.asList(['a', ' ', 'b']), ['a', 'b']);

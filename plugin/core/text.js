@@ -69,19 +69,63 @@ function codeUnitCompare(a, b) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+/**
+ * Split an inline YAML list on commas that are not inside quotes. A plain
+ * `split(',')` corrupts any value that contains a comma, which is exactly what
+ * a keyword like `v1, v2` is: `["a,b"]` came back as `["", "b\""]`.
+ * An unterminated quote keeps its text as written instead of throwing — a
+ * hand-edited file must still load.
+ */
+function splitInlineList(inner) {
+  const parts = [];
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < inner.length; i += 1) {
+    const char = inner[i];
+    if (quote) {
+      current += char;
+      if (quote === '"' && char === '\\' && i + 1 < inner.length) {
+        i += 1;
+        current += inner[i];
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === ',') {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts;
+}
+
+const unquoteItem = item => {
+  const text = item.trim();
+  if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+    try { return JSON.parse(text); } catch { return text.slice(1, -1); }
+  }
+  if (text.length >= 2 && text.startsWith("'") && text.endsWith("'")) {
+    return text.slice(1, -1).replace(/''/g, "'");
+  }
+  return text;
+};
+
 function yamlScalar(raw) {
   const value = String(raw ?? '').trim();
   if (!value) return '';
   if (value.startsWith('[') && value.endsWith(']')) {
     const inner = value.slice(1, -1).trim();
     if (!inner) return [];
-    return inner.split(',').map(part => {
-      const item = part.trim();
-      if (item.length >= 2 && (item.startsWith('"') || item.startsWith("'"))) {
-        return item.slice(1, -1);
-      }
-      return item;
-    });
+    return splitInlineList(inner).map(unquoteItem);
   }
   if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
     try { return JSON.parse(value); } catch { return value.slice(1, -1); }

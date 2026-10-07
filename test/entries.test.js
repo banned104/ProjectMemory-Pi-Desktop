@@ -157,7 +157,7 @@ test('renderEntry round-trips through parseEntry', () => {
     id: 'LSN-20260921-model-config',
     kind: 'lesson',
     title: 'Model config override',
-    keywords: ['model', 'config'],
+    keywords: ['model', 'config', 'v1, v2'],
     content: 'Symptom: nothing changes.',
     created: '2026-09-21',
     pinned: true,
@@ -170,6 +170,7 @@ test('renderEntry round-trips through parseEntry', () => {
   assert.equal(entry.kind, 'lesson');
   assert.equal(entry.pinned, true);
   assert.equal(entry.batchRef, 'deadbeef');
+  assert.deepEqual(entry.keywords, ['model', 'config', 'v1, v2']);
   // `supersedes` is the outgoing pointer on the new entry; `supersededBy` is
   // the incoming one set on the old entry. They are different directions.
   assert.match(raw, /supersedes: "LSN-20260901-old"/);
