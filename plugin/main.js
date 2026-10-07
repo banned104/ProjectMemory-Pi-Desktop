@@ -38,9 +38,16 @@ const io = {
 
 const loadCorpus = () => core.loadCorpus(io.reader);
 
+/**
+ * The plugin's own setting. `null` and `''` mean "not configured" and fall
+ * back to the default limit: `Number(null)` is 0, and an unconfigured setting
+ * must not silently mean "retrieve one entry".
+ */
 async function searchLimit() {
   const settings = await pi.plugin.getSettings().catch(() => ({}));
-  const value = Number(settings.searchLimit);
+  const raw = settings.searchLimit;
+  const blank = raw === null || raw === undefined || (typeof raw === 'string' && !raw.trim());
+  const value = blank ? NaN : Number(raw);
   return Number.isInteger(value) ? Math.min(Math.max(value, 1), core.MAX_LIMIT) : core.DEFAULT_LIMIT;
 }
 
