@@ -236,11 +236,21 @@ async function onPanelInvoke(channel, payload = {}) {
       return { discarded: batch.items.length };
     }
     // Project memory view (views/index.html).
-    case 'app.getAppearance':
-      // The review panel has always asked for this and it was never
-      // implemented, so its catch left that panel in English whatever the app
-      // language was. The view needs the same answer.
-      return { locale: await appLocale() };
+    case 'app.getAppearance': {
+      // The review panel has asked for this since it was written and it was
+      // never implemented, so the catch around its call left that panel in
+      // English whatever the app language was. Both surfaces want the whole
+      // appearance now: the view follows the resolved palette too.
+      let appearance = null;
+      try {
+        appearance = await pi.app.getAppearance();
+      } catch { /* an older host has no such call; the locale still gets through */ }
+      return {
+        theme: 'system', base: 'system', pluginTheme: null,
+        ...(appearance && typeof appearance === 'object' ? appearance : {}),
+        locale: typeof appearance?.locale === 'string' ? appearance.locale : await appLocale(),
+      };
+    }
     case 'memory.openReview':
       return Promise.resolve(pi.ui.openPanel()).then(() => ({ opened: true }));
     case 'memory.list': {

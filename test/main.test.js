@@ -20,7 +20,7 @@ function usePi(overrides = {}) {
   const state = memoryIo({});
   const calls = { tools: [], commands: [] };
   const pi = {
-    app: { getLocale: async () => 'en' },
+    app: { getLocale: async () => 'en', getAppearance: async () => ({ theme: 'light', base: 'light', locale: 'en', pluginTheme: null }) },
     plugin: { getSettings: async () => ({}) },
     workspace: { get: async () => ({ name: 'Project', path: '/project' }) },
     ui: { openPanel: async () => {} },
@@ -298,9 +298,22 @@ test('onLoad registers the three tools and one command, onUnload removes them', 
 const entryFile = (id, fields, body = 'Body text') =>
   ['---', `id: "${id}"`, ...fields, '---', '', body, ''].join('\n');
 
-test('app.getAppearance reports the app language to the panel', async () => {
+test('app.getAppearance reports the host appearance, and degrades without it', async () => {
+  usePi({
+    app: {
+      getLocale: async () => 'zh-CN',
+      getAppearance: async () => ({ theme: 'dark', base: 'dark', locale: 'zh-CN', pluginTheme: null }),
+    },
+  });
+  assert.deepEqual(await main.onPanelInvoke('app.getAppearance', {}), {
+    theme: 'dark', base: 'dark', pluginTheme: null, locale: 'zh-CN',
+  });
+
+  // An older host has no getAppearance; the language still has to get through.
   usePi({ app: { getLocale: async () => 'zh-CN' } });
-  assert.deepEqual(await main.onPanelInvoke('app.getAppearance', {}), { locale: 'zh-CN' });
+  assert.deepEqual(await main.onPanelInvoke('app.getAppearance', {}), {
+    theme: 'system', base: 'system', pluginTheme: null, locale: 'zh-CN',
+  });
 });
 
 test('memory.list returns cards, counts and the project the view is bound to', async () => {
