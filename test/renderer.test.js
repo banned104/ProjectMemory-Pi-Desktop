@@ -15,7 +15,7 @@ function loadFormatter() {
   assert.ok(table, 'the panel must still define its TEXT table');
   const TEXT = new Function(`${table[0]}; return TEXT;`)();
 
-  const start = SOURCE.indexOf('const lines = result.saved.length');
+  const start = SOURCE.indexOf('const already = result.already');
   const end = SOURCE.indexOf('\n', SOURCE.indexOf("show('result'", start));
   assert.ok(start >= 0 && end > start, 'the panel must still format the commit result');
   const block = SOURCE.slice(start, end);
@@ -58,5 +58,17 @@ test('the panel does not prepend that line when something was saved', () => {
   assert.equal(
     run('zh-CN', { saved: [{ id: 'LSN-1', title: 'A' }], skipped: 2, warnings: [] }),
     '已保存 <b>LSN-1</b> A<br>跳过 2 条',
+  );
+});
+
+test('the panel reports what an earlier round wrote instead of "nothing was saved"', () => {
+  const { run } = loadFormatter();
+  assert.equal(
+    run('en', { saved: [], already: [{ id: 'LSN-1' }], skipped: 0, pending: 1, warnings: [] }),
+    'already saved by this batch: LSN-1<br>1 undecided, kept in the list',
+  );
+  assert.equal(
+    run('zh-CN', { saved: [], already: [{ id: 'LSN-1' }], skipped: 0, warnings: [] }),
+    '此前已由本批次保存：LSN-1',
   );
 });

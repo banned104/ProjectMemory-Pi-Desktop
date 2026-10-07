@@ -452,12 +452,28 @@ async function commitBatch(io, batch, selections, options = {}) {
     throw error;
   }
 
-  // Every item falls into exactly one of: written, decided but not written, or
-  // still undecided. Only a batch with nothing left undecided is finished.
-  const pending = batch.items.filter((item, index) => !item.savedAs && !seen.has(index)).length;
+  // Every item falls into exactly one of: written now, already on disk from an
+  // earlier round of this batch, decided without a write, or still undecided.
+  // "Already on disk" is read from the batchRef scan and not from memory: a
+  // batch re-read from disk carries no `savedAs`, so a second round used to
+  // re-report entries that were plainly there as undecided, and to answer
+  // "nothing was saved" about a batch that had already saved most of itself.
+  const keyOf = item => replayKey(item.kind, item.title);
+  // Only the identifying fields: the result is written back into the batch file
+  // when a batch cannot be deleted, and a whole corpus entry would put an 8 KB
+  // body in there for nothing.
+  const already = batch.items
+    .filter((item, index) => !item.savedAs && !seen.has(index) && landed.has(keyOf(item)))
+    .map(item => {
+      const { id, kind, title } = landed.get(keyOf(item));
+      return { id, kind, title };
+    });
+  const pending = batch.items.filter((item, index) =>
+    !item.savedAs && !seen.has(index) && !landed.has(keyOf(item))).length;
   const result = {
     saved,
-    skipped: batch.items.length - saved.length - pending,
+    already,
+    skipped: batch.items.length - saved.length - already.length - pending,
     pending,
     warnings,
   };
@@ -468,14 +484,18 @@ async function commitBatch(io, batch, selections, options = {}) {
 function describeResult(result, locale) {
   // "Nothing was saved" is an outcome in its own right. Without it a single
   // item chosen as "duplicate" reads as a bare "1 skipped", and the user is
-  // left wondering whether anything landed.
-  const lines = result.saved.length ? [] : [t(locale, 'nothingSaved')];
+  // left wondering whether anything landed. It is the wrong thing to say when
+  // an earlier round of this batch already wrote entries, though: those are on
+  // disk, and saying otherwise invites a duplicate proposal.
+  const already = result.already ?? [];
+  const lines = result.saved.length || already.length ? [] : [t(locale, 'nothingSaved')];
   lines.push(...result.saved.map(entry =>
     entry.action === 'replace'
       ? t(locale, 'savedReplace', entry.id, entry.targetId)
       : entry.action === 'conflict'
         ? t(locale, 'savedConflict', entry.id, entry.targetId)
         : t(locale, 'saved', entry.id, entry.kind, clip(entry.title, 80))));
+  if (already.length) lines.push(t(locale, 'alreadySaved', already.map(entry => entry.id).join(', ')));
   if (result.skipped) lines.push(t(locale, 'notSaved', result.skipped));
   if (result.pending) lines.push(t(locale, 'pending', result.pending));
   return [...lines, ...result.warnings];

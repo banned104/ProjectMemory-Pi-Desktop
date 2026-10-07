@@ -433,6 +433,59 @@ test('a duplicate verdict is a decision, not a pending item', async () => {
   assert.equal(io.files.has(core.batchPath(batch.id)), false);
 });
 
+test('a second round reports what an earlier round wrote, not "nothing"', async () => {
+  const io = memoryIo({});
+  const batch = makeBatch([
+    { item: makeItem({ title: 'Alpha', content: 'first' }), similar: [] },
+    { item: makeItem({ title: 'Beta', content: 'second' }), similar: [] },
+  ]);
+  await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
+
+  const first = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), [{ index: 0, key: 'create' }]);
+  assert.equal(first.saved.length, 1);
+  assert.equal(first.pending, 1);
+  assert.deepEqual(first.already, []);
+
+  // The second round answers nothing: the host only returns what the user
+  // touched, and the batch as re-read from disk carries no `savedAs`.
+  const second = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), []);
+
+  assert.deepEqual(second.saved, [], 'nothing is written twice');
+  assert.deepEqual(second.already.map(entry => entry.id), [first.saved[0].id]);
+  assert.equal(second.pending, 1, 'only the genuinely undecided item is still pending');
+  assert.equal(second.skipped, 0);
+
+  const text = core.describeResult(second, 'en').join('\n');
+  assert.doesNotMatch(text, /Nothing was saved/,
+    'the entry is on disk; claiming otherwise invites a duplicate proposal');
+  assert.match(text, new RegExp(`already saved by this batch in an earlier round: ${first.saved[0].id}`));
+  assert.match(text, /1 item still without your decision/);
+  assert.ok(io.files.has(core.batchPath(batch.id)), 'one item is still undecided, so the batch stays');
+});
+
+test('an entry written by this round is reported as saved, not as already saved', async () => {
+  const io = memoryIo({});
+  const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
+  const selections = [{ index: 0, key: 'create' }];
+
+  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+  const replay = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+
+  assert.equal(replay.saved.length, 1);
+  assert.equal(replay.saved[0].id, first.saved[0].id);
+  assert.deepEqual(replay.already, []);
+  assert.equal(replay.pending, 0);
+  assert.equal([...io.files.keys()].filter(path => path.startsWith(`${MEMORY}/`)).length, 1);
+});
+
+test('describeResult names the entries an earlier round wrote', () => {
+  const lines = core.describeResult({
+    saved: [], already: [{ id: 'LSN-1', kind: 'lesson', title: 'Alpha' }], skipped: 0, pending: 1, warnings: [],
+  }, 'en');
+  assert.equal(lines[0], 'already saved by this batch in an earlier round: LSN-1');
+  assert.match(lines[1], /1 item still without your decision/);
+});
+
 // --- The idempotency guarantee ---------------------------------------------
 
 test('a retry after a failed inbox write-back does not duplicate entries', async () => {

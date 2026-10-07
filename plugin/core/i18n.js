@@ -37,6 +37,7 @@ const MESSAGES = {
     notSaved: n => `跳过 ${n} 条`,
     pending: n => `${n} 条还没有你的决定，保留在待确认列表`,
     nothingSaved: '没有保存任何条目',
+    alreadySaved: ids => `本批次此前已保存，无需重复写入：${ids}`,
 
     backlinkFailed: (id, target, message) => `${id} 已保存，但回链 ${target} 失败：${message}`,
     inboxWriteFailed: message => `批次状态未能写回（不影响已保存的条目）：${message}`,
@@ -88,6 +89,7 @@ const MESSAGES = {
     notSaved: n => `${n} skipped`,
     pending: n => `${n} item${n === 1 ? '' : 's'} still without your decision; kept in the pending list`,
     nothingSaved: 'Nothing was saved',
+    alreadySaved: ids => `already saved by this batch in an earlier round: ${ids}`,
 
     backlinkFailed: (id, target, message) => `${id} was saved, but linking back to ${target} failed: ${message}`,
     inboxWriteFailed: message => `batch state could not be written back (saved entries are unaffected): ${message}`,
