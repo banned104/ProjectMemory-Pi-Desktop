@@ -34,6 +34,11 @@ const io = {
   },
   // No fs.delete permission: a batch handled in the panel is marked done instead (see core.retireBatch).
   remove: async () => { throw new Error('the plugin process does not delete files'); },
+  // The one delete the plugin process performs: a memory entry the user just
+  // confirmed removing in the view. `remove` above stays a throwing stub on
+  // purpose -- `retireBatch` relies on that to mark a handled batch `done`
+  // rather than erase it, which is what the review panel documents.
+  removeEntry: source => pi.fs.remove(source),
 };
 
 const loadCorpus = () => core.loadCorpus(io.reader);
@@ -194,6 +199,26 @@ async function commit({ batchId, selections } = {}) {
   }
 }
 
+/**
+ * The view edits and deletes one entry at a time. Two clicks on the same card
+ * must not interleave a read and a write on its file.
+ */
+const entryLocks = new Set();
+async function withEntryLock(id, run) {
+  if (entryLocks.has(id)) throw new Error(core.t(await appLocale(), 'busy'));
+  entryLocks.add(id);
+  try { return await run(); }
+  finally { entryLocks.delete(id); }
+}
+
+/** Look an entry up by the id the page sends. The page never names a path. */
+async function findEntry(id) {
+  const key = typeof id === 'string' ? id.trim() : '';
+  const entry = (await loadCorpus()).find(candidate => candidate.id === key);
+  if (!entry) throw new Error(`Memory entry not found: ${key}`);
+  return entry;
+}
+
 async function onPanelInvoke(channel, payload = {}) {
   switch (channel) {
     case 'inbox.list': {
@@ -209,6 +234,57 @@ async function onPanelInvoke(channel, payload = {}) {
       const batch = await core.readBatch(io, payload.batchId, await appLocale());
       await core.retireBatch(io, batch, { saved: [], skipped: batch.items.length, warnings: [] });
       return { discarded: batch.items.length };
+    }
+    // Project memory view (views/index.html).
+    case 'app.getAppearance':
+      // The review panel has always asked for this and it was never
+      // implemented, so its catch left that panel in English whatever the app
+      // language was. The view needs the same answer.
+      return { locale: await appLocale() };
+    case 'memory.openReview':
+      return Promise.resolve(pi.ui.openPanel()).then(() => ({ opened: true }));
+    case 'memory.list': {
+      const workspace = await pi.workspace.get();
+      const cards = core.sortCards((await loadCorpus()).map(core.cardOf));
+      const pending = workspace ? (await core.listBatches(io)).length : 0;
+      return {
+        project: workspace ? { name: workspace.name, path: workspace.path } : null,
+        cards,
+        stats: core.statsOf(cards, { pending }),
+        disabled: await io.exists(`${core.MEMORY_DIR}/DISABLED`),
+      };
+    }
+    case 'memory.get': {
+      const entry = await findEntry(payload.id);
+      return { card: core.cardOf(entry), body: entry.body };
+    }
+    case 'memory.update': {
+      const entry = await findEntry(payload.id);
+      const changes = core.validatePatch(payload.patch);
+      return withEntryLock(entry.id, async () => {
+        const raw = await io.readText(entry.source);
+        // The page works from a snapshot. If the file became a different entry
+        // meanwhile, refuse instead of writing over whatever is there now.
+        if (core.parseEntry(entry.source, raw).id !== entry.id) {
+          throw new Error(`Memory entry changed on disk: ${entry.id}`);
+        }
+        const next = core.rewriteEntry(raw, {
+          fields: core.fieldsOf(changes, core.localDate()),
+          body: changes.body,
+        });
+        return io.writeText(entry.source, next).then(() => ({
+          card: core.cardOf(core.parseEntry(entry.source, next)),
+        }));
+      });
+    }
+    case 'memory.delete': {
+      const entry = await findEntry(payload.id);
+      return withEntryLock(entry.id, async () => {
+        // `deleteTarget` is the second half of the guarantee: even though the id
+        // came from a loaded entry, the path must still be an entry file under
+        // .workflow/memory before anything is unlinked.
+        return io.removeEntry(core.deleteTarget(entry.source)).then(() => ({ deleted: entry.id }));
+      });
     }
     default:
       throw new Error(`Unsupported panel action: ${channel}`);

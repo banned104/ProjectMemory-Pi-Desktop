@@ -36,6 +36,7 @@ function usePi(overrides = {}) {
       list: dir => state.reader.list(dir),
       readText: source => state.readText(source),
       writeText: (source, content) => state.writeText(source, content),
+      remove: source => state.remove(source),
       stat: async source => {
         if (!(await state.exists(source))) {
           const error = new Error(`path not found: ${source}`);
@@ -289,4 +290,135 @@ test('onLoad registers the three tools and one command, onUnload removes them', 
     ['unregister', 'search'], ['unregister', 'load'], ['unregister', 'propose'],
   ]);
   assert.deepEqual(calls.commands.slice(1), [['unregister', 'pi.project-memory.review']]);
+});
+
+// --- Project memory view ---------------------------------------------------
+
+/** A memory entry file with whatever frontmatter the case needs. */
+const entryFile = (id, fields, body = 'Body text') =>
+  ['---', `id: "${id}"`, ...fields, '---', '', body, ''].join('\n');
+
+test('app.getAppearance reports the app language to the panel', async () => {
+  usePi({ app: { getLocale: async () => 'zh-CN' } });
+  assert.deepEqual(await main.onPanelInvoke('app.getAppearance', {}), { locale: 'zh-CN' });
+});
+
+test('memory.list returns cards, counts and the project the view is bound to', async () => {
+  const { state } = usePi();
+  await state.writeText(`${MEMORY}/LES-20260921-alpha.md`, entryFile('LES-20260921-alpha', [
+    'kind: lesson', 'title: "Alpha"', 'keywords: ["alpha"]', 'status: active', 'created: 2026-09-21',
+  ]));
+  await state.writeText(`${MEMORY}/LES-20260922-beta.md`, entryFile('LES-20260922-beta', [
+    'kind: rule', 'title: "Beta"', 'keywords: []', 'status: active', 'created: 2026-09-22',
+  ]));
+  await state.writeText(`${MEMORY}/LES-20260923-gamma.md`, entryFile('LES-20260923-gamma', [
+    'kind: lesson', 'title: "Gamma"', 'keywords: []', 'status: retired', 'created: 2026-09-23',
+  ]));
+
+  const listed = await main.onPanelInvoke('memory.list', {});
+  assert.deepEqual(listed.project, { name: 'Project', path: '/project' });
+  assert.deepEqual(listed.cards.map(card => card.id),
+    ['LES-20260923-gamma', 'LES-20260922-beta', 'LES-20260921-alpha']);
+  assert.equal(listed.stats.total, 3);
+  assert.equal(listed.stats.retired, 1);
+  assert.equal(listed.stats.byKind.rule, 1);
+  assert.equal(listed.stats.pending, 0);
+  assert.equal(listed.disabled, false);
+});
+
+test('memory.list reports the opt-out marker and the unconfirmed batches', async () => {
+  const { state } = usePi();
+  await pendingBatch(state);
+  await state.writeText(`${MEMORY}/DISABLED`, '');
+
+  const listed = await main.onPanelInvoke('memory.list', {});
+  assert.equal(listed.disabled, true);
+  assert.equal(listed.stats.pending, 1);
+});
+
+test('memory.get returns the body for the editor and refuses an unknown id', async () => {
+  const { state } = usePi();
+  await state.writeText(`${MEMORY}/LES-20260921-alpha.md`, entryFile('LES-20260921-alpha', [
+    'kind: lesson', 'title: "Alpha"', 'keywords: []', 'status: active', 'created: 2026-09-21',
+  ], 'First line.\nSecond line.'));
+
+  const loaded = await main.onPanelInvoke('memory.get', { id: 'LES-20260921-alpha' });
+  assert.equal(loaded.card.title, 'Alpha');
+  assert.equal(loaded.body, 'First line.\nSecond line.');
+  await assert.rejects(() => main.onPanelInvoke('memory.get', { id: 'LES-20260921-nope' }), /not found/);
+});
+
+test('memory.update writes the edit and stamps it so the card moves up', async () => {
+  const { state } = usePi();
+  const source = `${MEMORY}/LES-20260921-alpha.md`;
+  await state.writeText(source, entryFile('LES-20260921-alpha', [
+    'kind: lesson', 'title: "Alpha"', 'keywords: ["old"]', 'status: active', 'created: 2026-09-21',
+  ], 'Old body.'));
+
+  const result = await main.onPanelInvoke('memory.update', {
+    id: 'LES-20260921-alpha',
+    patch: { title: 'Renamed', kind: 'procedure', keywords: ['a', 'b'], pinned: true, body: 'New body.' },
+  });
+
+  assert.equal(result.card.title, 'Renamed');
+  assert.equal(result.card.kind, 'procedure');
+  assert.equal(result.card.pinned, true);
+  const saved = core.parseEntry(source, await state.readText(source));
+  assert.equal(saved.title, 'Renamed');
+  assert.deepEqual(saved.keywords, ['a', 'b']);
+  assert.equal(saved.body, 'New body.');
+  assert.equal(saved.created, '2026-09-21', 'an edit must not rewrite the creation date');
+  assert.ok(saved.updated, 'an edit must leave a timestamp');
+});
+
+test('memory.update refuses a field the view may not change', async () => {
+  const { state } = usePi();
+  await state.writeText(`${MEMORY}/LES-20260921-alpha.md`, entryFile('LES-20260921-alpha', [
+    'kind: lesson', 'title: "Alpha"', 'keywords: []', 'status: active', 'created: 2026-09-21',
+  ]));
+  await assert.rejects(
+    () => main.onPanelInvoke('memory.update', { id: 'LES-20260921-alpha', patch: { id: 'MAP' } }),
+    /not editable/,
+  );
+});
+
+test('memory.update refuses to write over a file that became a different entry', async () => {
+  const { state } = usePi();
+  const source = `${MEMORY}/LES-20260921-alpha.md`;
+  await state.writeText(source, entryFile('LES-20260921-alpha', [
+    'kind: lesson', 'title: "Alpha"', 'keywords: []', 'status: active', 'created: 2026-09-21',
+  ]));
+
+  const readText = globalThis.pi.fs.readText;
+  let reads = 0;
+  globalThis.pi.fs.readText = async path => {
+    const text = await readText(path);
+    reads += 1;
+    return reads > 1 ? text.replace('LES-20260921-alpha', 'LES-20260921-zeta') : text;
+  };
+  await assert.rejects(
+    () => main.onPanelInvoke('memory.update', { id: 'LES-20260921-alpha', patch: { title: 'Renamed' } }),
+    /changed on disk/,
+  );
+});
+
+test('memory.delete removes exactly the entry file the id names', async () => {
+  const { state } = usePi();
+  await state.writeText(`${MEMORY}/LES-20260921-alpha.md`, entryFile('LES-20260921-alpha', [
+    'kind: lesson', 'title: "Alpha"', 'keywords: []', 'status: active', 'created: 2026-09-21',
+  ]));
+  await state.writeText(`${MEMORY}/LES-20260922-beta.md`, entryFile('LES-20260922-beta', [
+    'kind: rule', 'title: "Beta"', 'keywords: []', 'status: active', 'created: 2026-09-22',
+  ]));
+
+  assert.deepEqual(await main.onPanelInvoke('memory.delete', { id: 'LES-20260921-alpha' }), { deleted: 'LES-20260921-alpha' });
+  assert.deepEqual(memoryFiles(state), [`${MEMORY}/LES-20260922-beta.md`]);
+  await assert.rejects(() => main.onPanelInvoke('memory.delete', { id: 'LES-20260921-alpha' }), /not found/);
+});
+
+test('memory.openReview asks the host for the review panel', async () => {
+  const opened = [];
+  usePi({ ui: { openPanel: async () => { opened.push(true); } } });
+  assert.deepEqual(await main.onPanelInvoke('memory.openReview', {}), { opened: true });
+  assert.equal(opened.length, 1);
 });
