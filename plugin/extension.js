@@ -42,7 +42,7 @@ When you finish a task that produced knowledge worth reusing, call ${tool('propo
 - \`map\` — the project's module layout, entry points and key paths (one per project; propose an update to refresh it)
 - \`preference\` — a working preference for this project
 
-Never propose routine change descriptions, restatements of existing entries, or logs; proposing nothing is normal. ${tool('propose')} writes nothing: it returns arguments for ${ASK_TOOL}; call ${ASK_TOOL} with them unchanged so the user can choose on the card, and the choice is saved automatically. Never edit .workflow/memory files directly.`;
+Write every item under the card language rules in the propose tool description: clean final-state knowledge, complete words of two or more characters, code identifiers in their original English, none of the banned words, and no 「不是……而是……」-style contrast frames. Never propose routine change descriptions, restatements of existing entries, or logs; proposing nothing is normal. ${tool('propose')} writes nothing: it returns arguments for ${ASK_TOOL}; call ${ASK_TOOL} with them unchanged so the user can choose on the card, and the choice is saved automatically. Never edit .workflow/memory files directly.`;
 
 /** message key -> { ids: string[], block: string | null } */
 const injections = new Map();

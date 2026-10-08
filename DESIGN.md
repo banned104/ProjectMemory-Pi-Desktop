@@ -107,6 +107,8 @@ payload 回灌。若这个前提不成立，键会全部落空：`pinned` 条目
 
 实际工具名带宿主前缀：`plugin_pi_project_memory_<name>`。
 
+`propose` 的工具描述内含卡片语言规范（`core/language.js`）：模型写 `title`/`content`/`keywords` 时遵守——干净终态、完整双字词、标识符保持英文原文。
+
 ---
 
 ## 6. 存储

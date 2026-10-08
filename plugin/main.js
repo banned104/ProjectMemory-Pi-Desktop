@@ -143,7 +143,7 @@ const tools = {
   },
 
   propose: {
-    description: 'Propose reusable project memory (a pitfall and its fix, a rule, a decision, a procedure, the project map, a preference) for the user to confirm. Returns arguments for the asktool card; call asktool with them unchanged. Writes nothing until the user answers the card.',
+    description: 'Propose reusable project memory (a pitfall and its fix, a rule, a decision, a procedure, the project map, a preference) for the user to confirm. Returns arguments for the asktool card; call asktool with them unchanged. Writes nothing until the user answers the card.' + '\n\n' + core.CARD_LANGUAGE,
     risk: 'low',
     schema: {
       type: 'object',
