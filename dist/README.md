@@ -1,6 +1,7 @@
 # 打包产物
 
 | 文件 | 大小 | sha256 |
+| pi.project-memory-0.2.2.piplug | 199,869 B | 884efd37b91fc5415b875ca5f8712108bbc9847acb2d66096d67496724376d |
 |---|---|---|
  | `pi.project-memory-0.2.1.piplug` | 191,841 B | `b2668182826354bff02c46304f9ff5ef069af84fa893f68b48477f4a9938bc78` |
 | `pi.project-memory-0.2.0.piplug` | 181,260 B | `1ad5eb9b14ec8a747ba43e51872481cd3f7360d651a6d08b0d32d503aabf9de5` |
@@ -12,7 +13,7 @@
 由宿主 `PluginPack` 生成（先跑 `PluginCheck`，两者均通过；唯一警告是高风险的
 `agent.tool.register` / `fs.write` / `fs.delete` 需用户显式授权）。
 
-包内 19 个条目，全部为 zip `store` 未压缩——这是宿主 `extract_zip_bytes` 的硬性要求，
+0.2.2 包内 19 个条目，全部为 zip `store` 未压缩——这是宿主 `extract_zip_bytes` 的硬性要求，
 不是可以优化的选项。
 
 ## 复现方式
