@@ -17,9 +17,9 @@ const text = require('./text.js');
 const entries = require('./entries.js');
 const batch = require('./batch.js');
 
-const { MEMORY_DIR, KINDS, isActive } = entries;
-const { normalize, asList, sanitize, firstLine, clip } = text;
-const { MAX_TITLE, MAX_CONTENT, MAX_KEYWORDS } = batch;
+ const { MEMORY_DIR, KINDS, isActive } = entries;
+ const { normalize, asList, sanitize, firstLine, clip, codeUnitCompare } = text;
+ const { MAX_TITLE, MAX_CONTENT, MAX_KEYWORDS } = batch;
 
 /** Fields the view may change. `id`, `created`, `batchRef` and the link fields are not among them. */
 const EDITABLE = ['title', 'kind', 'keywords', 'pinned', 'status', 'body'];
@@ -60,11 +60,11 @@ function cardOf(entry) {
 }
 
 /** Newest first: an edit moves a card up, and ties stay reproducible by id. */
-function sortCards(cards) {
-  const when = card => card.updated || card.created || '';
-  return [...cards].sort((a, b) =>
-    (when(b).localeCompare(when(a)) || a.id.localeCompare(b.id)));
-}
+ function sortCards(cards) {
+   const when = card => card.updated || card.created || '';
+   return [...cards].sort((a, b) =>
+     (codeUnitCompare(when(b), when(a)) || codeUnitCompare(a.id, b.id)));
+ }
 
 function daysSince(date, now) {
   if (!date) return Infinity;
@@ -175,19 +175,21 @@ function fieldsOf(patch, date) {
  * plugin process just loaded, never from the page, so this is the second half
  * of that guarantee rather than the first.
  */
-function deleteTarget(source) {
-  const rel = typeof source === 'string' ? source : '';
-  const prefix = `${MEMORY_DIR}/`;
-  const ok = rel.startsWith(prefix)
-    && rel.length > prefix.length + 3
-    && /\.md$/i.test(rel)
-    && !rel.includes('..')
-    && !rel.includes('\\')
-    && !rel.includes('\0')
-    && !rel.slice(prefix.length).split('/').some(part => !part || part === '.');
-  if (!ok) throw fail('badTarget', `not a memory entry file: ${rel}`);
-  return rel;
-}
+ function deleteTarget(source) {
+   const rel = typeof source === 'string' ? source : '';
+   const prefix = `${MEMORY_DIR}/`;
+   const ok = rel.startsWith(prefix)
+     && rel.length > prefix.length + 3
+     && /\.md$/i.test(rel)
+     && !rel.includes('..')
+     && !rel.includes('\\')
+     && !rel.includes('\0')
+     && !rel.includes(':')
+     && rel.charCodeAt(0) !== 0xFEFF
+     && !rel.slice(prefix.length).split('/').some(part => !part || part === '.' || part === '..' || part.endsWith('.') || part.endsWith(' '));
+   if (!ok) throw fail('badTarget', `not a memory entry file: ${rel}`);
+   return rel;
+ }
 
 module.exports = {
   EDITABLE, STATUSES, MAX_BODY, RECENT_DAYS,

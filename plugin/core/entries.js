@@ -108,28 +108,45 @@ function parseEntry(source, raw) {
   };
 }
 
-/**
- * Walk both memory directories and parse every `.md` file. Ordering is by
- * code unit so the first-wins rule for duplicate ids is reproducible.
- */
-async function loadCorpus(reader) {
-  const files = [];
-  let queued = 0;
-  const walk = async dir => {
-    if (files.length >= MAX_FILES || queued >= MAX_TOTAL_BYTES) return;
-    let listed;
-    try { listed = await reader.list(dir); }
-    catch (error) { if (isMissing(error)) return; throw error; }
-    for (const entry of [...listed].sort((a, b) => codeUnitCompare(a.path, b.path))) {
-      if (files.length >= MAX_FILES || queued >= MAX_TOTAL_BYTES) return;
-      if (entry.isDirectory) { await walk(entry.path); continue; }
-      if (!/\.md$/i.test(entry.name)) continue;
-      const size = Number.isFinite(entry.size) ? entry.size : 0;
-      if (size > MAX_FILE_BYTES) continue;
-      queued += size;
-      files.push(entry.path);
-    }
-  };
+ /**
+  * A listed path is data from outside this module (host gateway or confined
+  * fs). Trusting it verbatim lets a hostile lister pull reads outside the
+  * memory directory, so paths that do not look like entry files are skipped.
+  */
+ function validCorpusPath(p, allowDir) {
+   if (typeof p !== 'string' || !p.startsWith(`${MEMORY_DIR}/`)) return false;
+   if (p.includes('\\') || p.includes('\0') || p.includes(':') || p.charCodeAt(0) === 0xFEFF) return false;
+   const rest = p.slice(MEMORY_DIR.length + 1);
+   if (!rest || rest.includes('//')) return false;
+   const parts = rest.split('/');
+   if (parts.some(part => !part || part === '.' || part === '..' || part.endsWith('.') || part.endsWith(' '))) return false;
+   if (!allowDir && !/\.md$/i.test(p)) return false;
+   return true;
+ }
+
+ /**
+  * Walk both memory directories and parse every `.md` file. Ordering is by
+  * code unit so the first-wins rule for duplicate ids is reproducible.
+  */
+ async function loadCorpus(reader) {
+   const files = [];
+   let queued = 0;
+   const walk = async dir => {
+     if (files.length >= MAX_FILES || queued >= MAX_TOTAL_BYTES) return;
+     let listed;
+     try { listed = await reader.list(dir); }
+     catch (error) { if (isMissing(error)) return; throw error; }
+     for (const entry of [...listed].sort((a, b) => codeUnitCompare(a.path, b.path))) {
+       if (files.length >= MAX_FILES || queued >= MAX_TOTAL_BYTES) return;
+       if (!validCorpusPath(entry.path, entry.isDirectory)) continue;
+       if (entry.isDirectory) { await walk(entry.path); continue; }
+       if (!/\.md$/i.test(entry.name)) continue;
+       const size = Number.isFinite(entry.size) ? entry.size : 0;
+       if (size > MAX_FILE_BYTES) continue;
+       queued += size;
+       files.push(entry.path);
+     }
+   };
   await walk(MEMORY_DIR);
 
   const entries = [];

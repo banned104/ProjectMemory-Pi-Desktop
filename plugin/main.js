@@ -268,25 +268,29 @@ async function onPanelInvoke(channel, payload = {}) {
       const entry = await findEntry(payload.id);
       return { card: core.cardOf(entry), body: entry.body };
     }
-    case 'memory.update': {
-      const entry = await findEntry(payload.id);
-      const changes = core.validatePatch(payload.patch);
-      return withEntryLock(entry.id, async () => {
-        const raw = await io.readText(entry.source);
-        // The page works from a snapshot. If the file became a different entry
-        // meanwhile, refuse instead of writing over whatever is there now.
-        if (core.parseEntry(entry.source, raw).id !== entry.id) {
-          throw new Error(`Memory entry changed on disk: ${entry.id}`);
-        }
-        const next = core.rewriteEntry(raw, {
-          fields: core.fieldsOf(changes, core.localDate()),
-          body: changes.body,
-        });
-        return io.writeText(entry.source, next).then(() => ({
-          card: core.cardOf(core.parseEntry(entry.source, next)),
-        }));
-      });
-    }
+     case 'memory.update': {
+       const entry = await findEntry(payload.id);
+       const changes = core.validatePatch(payload.patch);
+       // Same second-half guarantee as delete: even though the id came from a
+       // loaded entry, the path must still be an entry file under
+       // .workflow/memory before anything is overwritten.
+       const target = core.deleteTarget(entry.source);
+       return withEntryLock(entry.id, async () => {
+         const raw = await io.readText(target);
+         // The page works from a snapshot. If the file became a different entry
+         // meanwhile, refuse instead of writing over whatever is there now.
+         if (core.parseEntry(target, raw).id !== entry.id) {
+           throw new Error(`Memory entry changed on disk: ${entry.id}`);
+         }
+         const next = core.rewriteEntry(raw, {
+           fields: core.fieldsOf(changes, core.localDate()),
+           body: changes.body,
+         });
+         return io.writeText(target, next).then(() => ({
+           card: core.cardOf(core.parseEntry(target, next)),
+         }));
+       });
+     }
     case 'memory.delete': {
       const entry = await findEntry(payload.id);
       return withEntryLock(entry.id, async () => {

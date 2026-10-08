@@ -37,27 +37,40 @@ const replayKey = (kind, title) => `${kind}\u0000${normalize(title)}`;
 
 // --- Proposal validation ---------------------------------------------------
 
-function validateItems(items) {
-  if (!Array.isArray(items) || !items.length) throw new Error('items must be a non-empty array');
-  if (items.length > MAX_ITEMS) throw new Error(`at most ${MAX_ITEMS} items per proposal`);
-  return items.map((item, index) => {
-    const kind = typeof item?.kind === 'string' ? item.kind.trim() : '';
-    if (!['lesson', 'rule', 'decision', 'procedure', 'map', 'preference'].includes(kind)) {
-      throw new Error(`items[${index}].kind must be one of: lesson, rule, decision, procedure, map, preference`);
-    }
-    const title = typeof item?.title === 'string' ? item.title.trim() : '';
-    const content = typeof item?.content === 'string' ? item.content.trim() : '';
-    if (!title) throw new Error(`items[${index}].title is required`);
-    if (!content) throw new Error(`items[${index}].content is required`);
-    if (title.length > MAX_TITLE) throw new Error(`items[${index}].title exceeds ${MAX_TITLE} characters`);
-    if (content.length > MAX_CONTENT) throw new Error(`items[${index}].content exceeds ${MAX_CONTENT} characters`);
-    const keywords = (Array.isArray(item?.keywords) ? item.keywords : [])
-      .filter(k => typeof k === 'string' && k.trim())
-      .map(k => k.trim())
-      .slice(0, MAX_KEYWORDS);
-    return { kind, title, content, keywords, pin: item?.pin === true };
-  });
-}
+ function validateItems(items) {
+   if (!Array.isArray(items) || !items.length) throw new Error('items must be a non-empty array');
+   if (items.length > MAX_ITEMS) throw new Error(`at most ${MAX_ITEMS} items per proposal`);
+   const normalized = items.map((item, index) => {
+     const kind = typeof item?.kind === 'string' ? item.kind.trim() : '';
+     if (!['lesson', 'rule', 'decision', 'procedure', 'map', 'preference'].includes(kind)) {
+       throw new Error(`items[${index}].kind must be one of: lesson, rule, decision, procedure, map, preference`);
+     }
+     const title = typeof item?.title === 'string' ? item.title.trim() : '';
+     const content = typeof item?.content === 'string' ? item.content.trim() : '';
+     if (!title) throw new Error(`items[${index}].title is required`);
+     if (!content) throw new Error(`items[${index}].content is required`);
+     if (title.length > MAX_TITLE) throw new Error(`items[${index}].title exceeds ${MAX_TITLE} characters`);
+     if (content.length > MAX_CONTENT) throw new Error(`items[${index}].content exceeds ${MAX_CONTENT} characters`);
+     const keywords = (Array.isArray(item?.keywords) ? item.keywords : [])
+       .filter(k => typeof k === 'string' && k.trim())
+       .map(k => k.trim())
+       .slice(0, MAX_KEYWORDS);
+     return { kind, title, content, keywords, pin: item?.pin === true };
+   });
+   // Two items that replay to the same key collapse onto one landed entry on
+   // retry while getting distinct ids on first write: reject them up front.
+   // Two maps in one batch last-wins on the singleton file for the same reason.
+   const seen = new Set();
+   let maps = 0;
+   normalized.forEach((item, index) => {
+     if (item.kind === 'map') maps += 1;
+     const key = `${item.kind}\u0000${normalize(item.title)}`;
+     if (seen.has(key)) throw new Error(`items[${index}] duplicates an earlier proposal (same kind and title)`);
+     seen.add(key);
+   });
+   if (maps > 1) throw new Error('at most one map item per proposal');
+   return normalized;
+ }
 
 /** Same kind only: replacing a lesson with a procedure is never the intent. */
 function findSimilar(entries, item, limit = MAX_SIMILAR) {
@@ -422,17 +435,24 @@ async function commitBatch(io, batch, selections, options = {}) {
       // leaving an earlier partial run half-linked.
       // The map is a singleton: replacing it overwrites the same file, so there
       // is no old entry to retire.
-      if (item.kind !== 'map' && target && (option.action === 'replace' || option.action === 'conflict')) {
-        try {
-          const raw = await io.readText(target.source);
-          const fields = option.action === 'replace'
-            ? { status: 'deprecated', supersededBy: id }
-            : { related: [...new Set([...target.related, id])] };
-          await io.writeText(target.source, setFrontmatterFields(raw, fields));
-        } catch (error) {
-          warnings.push(t(locale, 'backlinkFailed', id, target.id, String(error?.message ?? error)));
-        }
-      }
+       if (item.kind !== 'map' && target && (option.action === 'replace' || option.action === 'conflict')) {
+         // Defense in depth: the target came from a just-loaded corpus, but a
+         // hostile lister could have planted a path outside the memory dir.
+         const src = typeof target.source === 'string' ? target.source : '';
+         const safe = src.startsWith(`${MEMORY_DIR}/`) && /\.md$/i.test(src)
+           && !src.includes('..') && !src.includes('\\') && !src.includes(':');
+         if (!safe) {
+           warnings.push(t(locale, 'backlinkFailed', id, target.id, 'invalid target path'));
+         } else try {
+           const raw = await io.readText(target.source);
+           const fields = option.action === 'replace'
+             ? { status: 'deprecated', supersededBy: id }
+             : { related: [...new Set([...target.related, id])] };
+           await io.writeText(target.source, setFrontmatterFields(raw, fields));
+         } catch (error) {
+           warnings.push(t(locale, 'backlinkFailed', id, target.id, String(error?.message ?? error)));
+         }
+       }
     }
   } catch (error) {
     if (saved.length) {

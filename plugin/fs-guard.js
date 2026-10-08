@@ -72,12 +72,14 @@ function createProjectFs(root, sessionId, options = {}) {
     const key = anchorKey(dir, id);
     let pinned = anchors.get(key);
     if (!pinned) {
+      // Fail closed: evicting an old pin and re-anchoring would silently accept
+      // a root swapped mid-session. Refuse new pins once the table is full.
+      if (anchors.size >= MAX_ANCHORS) throw rootError();
       const real = await fsp.realpath(dir);
       const stat = await fsp.lstat(real);
       if (!stat.isDirectory()) throw rootError();
       pinned = { real, dev: stat.dev, ino: stat.ino };
       anchors.set(key, pinned);
-      while (anchors.size > MAX_ANCHORS) anchors.delete(anchors.keys().next().value);
     }
     return pinned;
   }
@@ -99,8 +101,9 @@ function createProjectFs(root, sessionId, options = {}) {
 
   function partsOf(rel) {
     if (typeof rel !== 'string' || !rel || path.isAbsolute(rel) || rel.includes('\\')) throw escapeError(rel);
+    if (rel.includes('\0') || rel.includes(':') || rel.charCodeAt(0) === 0xFEFF) throw escapeError(rel);
     const parts = rel.split('/');
-    if (parts.some(part => !part || part === '.' || part === '..')) throw escapeError(rel);
+    if (parts.some(part => !part || part === '.' || part === '..' || part.endsWith('.') || part.endsWith(' '))) throw escapeError(rel);
     return parts;
   }
 
@@ -233,18 +236,25 @@ function createProjectFs(root, sessionId, options = {}) {
     catch (error) { await fsp.rm(full, { force: true }); throw error; }
   }
 
-  async function exists(rel) {
-    const anchor = await base();
-    return assertNoLinks(anchor, partsOf(rel), rel, { missingOk: true });
-  }
-
-  async function remove(rel) {
-    const anchor = await base();
-    const parts = writableParts(rel);
-    await assertNoLinks(anchor, parts, rel);
-    await assertCanonical(anchor, path.join(anchor, ...parts.slice(0, -1)), rel);
-    await fsp.unlink(path.join(anchor, ...parts));
-  }
+   async function exists(rel) {
+     const anchor = await base();
+     return assertNoLinks(anchor, partsOf(rel), rel, { missingOk: true });
+   }
+ 
+   async function remove(rel) {
+     const anchor = await base();
+     const parts = writableParts(rel);
+     await assertNoLinks(anchor, parts, rel);
+     await assertCanonical(anchor, path.join(anchor, ...parts.slice(0, -1)), rel);
+     const full = path.join(anchor, ...parts);
+     let st;
+     try { st = await fsp.lstat(full); }
+     catch (error) { throw error; }
+     if (st.isSymbolicLink()) throw linkError(rel);
+     if (!st.isFile()) throw notFileError(rel);
+     await fsp.unlink(full);
+     await base(); // the root must not have moved while removing
+   }
 
   return { reader: { list, read }, readText: read, writeText, exists, remove };
 }

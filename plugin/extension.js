@@ -105,14 +105,15 @@ function appendBlock(payload, list, turn, block) {
 }
 
 /** Identical prompt texts are told apart by their occurrence number. */
-function turnKeys(cwd, turns) {
-  const seen = new Map();
-  return turns.map(turn => {
-    const n = (seen.get(turn.text) ?? 0) + 1;
-    seen.set(turn.text, n);
-    return crypto.createHash('sha256').update(`${cwd}\u0000${n}\u0000${turn.text}`).digest('hex');
-  });
-}
+ function turnKeys(cwd, turns, sessionId) {
+   const seen = new Map();
+   const scope = `${sessionId ?? ''}|${cwd}`;
+   return turns.map(turn => {
+     const n = (seen.get(turn.text) ?? 0) + 1;
+     seen.set(turn.text, n);
+     return crypto.createHash('sha256').update(`${scope}|${n}|${turn.text}`).digest('hex');
+   });
+ }
 
 // The cache is keyed on the prompt text, so it relies on the host rebuilding
 // each request's payload from its own conversation history rather than feeding
@@ -133,18 +134,21 @@ const sessionIdOf = ctx => {
  * reads and the confirmed writes would land in the replacement. `session_start`
  * must therefore pin through the same instance every later hook uses.
  */
-const MAX_IO = 200;
-const projectIo = new Map();
-function nodeIo(root, sessionId) {
-  const key = `${sessionId ?? ''}\u0000${root}`;
-  let io = projectIo.get(key);
-  if (!io) {
-    io = createProjectFs(root, sessionId);
-    projectIo.set(key, io);
-    while (projectIo.size > MAX_IO) projectIo.delete(projectIo.keys().next().value);
-  }
-  return io;
-}
+ const MAX_IO = 200;
+ const projectIo = new Map();
+ function nodeIo(root, sessionId) {
+   const sid = sessionId ?? '';
+   const key = `${sid}|${root}`;
+   let io = projectIo.get(key);
+   if (!io) {
+     // Fail closed: evicting an old pin and re-anchoring would silently accept
+     // a root swapped mid-session. Refuse new pins once the table is full.
+     if (projectIo.size >= MAX_IO) throw Object.assign(new Error('too many pinned projects'), { code: 'E_ROOTMOVED' });
+     io = createProjectFs(root, sessionId);
+     projectIo.set(key, io);
+   }
+   return io;
+ }
 
 /**
  * Pinned entries are orientation and go in regardless of the query; retrieved
@@ -185,7 +189,7 @@ async function onProviderRequest(event, ctx, deps = {}) {
   if (typeof cwd !== 'string' || !cwd || !payload || typeof payload !== 'object') return undefined;
   const found = promptTurns(payload);
   if (!found || !found.turns.length) return undefined;
-  const keys = turnKeys(cwd, found.turns);
+   const keys = turnKeys(cwd, found.turns, sessionIdOf(ctx));
 
   const lastKey = keys[keys.length - 1];
   if (!injections.has(lastKey)) {
