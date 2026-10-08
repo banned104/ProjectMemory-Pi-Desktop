@@ -241,3 +241,15 @@ test('kindLabel names every kind and never leaks an unlisted one', () => {
   assert.equal(ui.kindLabel('zh-CN', 'preference'), '偏好');
   assert.equal(ui.kindLabel('en', '<script>'), 'Lesson');
 });
+test('orderCards mirrors the core order: pinned first, dateless last', () => {
+  const cards = [
+    card({ id: 'new', created: '2026-09-25', updated: '' }),
+    card({ id: 'old-pin', created: '2026-01-01', updated: '', pinned: true }),
+    card({ id: 'mid', created: '2026-06-01', updated: '' }),
+    card({ id: 'nodate', created: '', updated: '' }),
+  ];
+  assert.deepEqual(ui.orderCards(cards).map(c => c.id), ['old-pin', 'new', 'mid', 'nodate']);
+  assert.deepEqual(ui.orderCards(cards, 'asc').map(c => c.id), ['old-pin', 'mid', 'new', 'nodate']);
+  assert.deepEqual(ui.orderCards(cards, 'desc').map(c => c.id), ['old-pin', 'new', 'mid', 'nodate']);
+  assert.deepEqual(ui.orderCards(null), []);
+});

@@ -59,11 +59,21 @@ function cardOf(entry) {
   };
 }
 
-/** Newest first: an edit moves a card up, and ties stay reproducible by id. */
- function sortCards(cards) {
-   const when = card => card.updated || card.created || '';
+/**
+ * Card order for the view. Pinned cards always come first; the rest follow
+ * `updated || created` — newest first by default (`desc`), oldest first for
+ * `asc`. Cards without any date sort last in both directions, and ties stay
+ * reproducible by id. Unknown orders fall back to the default.
+ */
+const SORT_ORDERS = ['default', 'asc', 'desc'];
+ function sortCards(cards, order = 'default') {
+   const dir = order === 'asc' ? 1 : -1;
+   const when = card => String(card.updated || card.created || '');
    return [...cards].sort((a, b) =>
-     (codeUnitCompare(when(b), when(a)) || codeUnitCompare(a.id, b.id)));
+     ((b.pinned === true) - (a.pinned === true))
+     || ((!when(a) && when(b)) ? 1 : ((!when(b) && when(a)) ? -1 : 0))
+     || (dir * codeUnitCompare(when(a), when(b)))
+     || codeUnitCompare(a.id, b.id));
  }
 
 function daysSince(date, now) {
@@ -192,7 +202,7 @@ function fieldsOf(patch, date) {
  }
 
 module.exports = {
-  EDITABLE, STATUSES, MAX_BODY, RECENT_DAYS,
+  EDITABLE, STATUSES, SORT_ORDERS, MAX_BODY, RECENT_DAYS,
   cardOf, sortCards, daysSince, statsOf,
   validatePatch, fieldsOf, deleteTarget,
   // Re-exported so callers do not have to know which core module owns them.

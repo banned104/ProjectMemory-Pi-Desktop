@@ -27,6 +27,9 @@ const TEXT = {
     filterActive: 'Active',
     filterRetired: 'Retired',
     pinnedOnly: 'Pinned only',
+    sortDefault: 'Default order',
+    sortAsc: 'Oldest first',
+    sortDesc: 'Newest first',
     unitEntries: 'entries',
     unitKinds: 'kinds',
     labelPinned: 'pinned',
@@ -81,6 +84,9 @@ const TEXT = {
     filterActive: '生效中',
     filterRetired: '已停用',
     pinnedOnly: '仅置顶',
+    sortDefault: '默认排序',
+    sortAsc: '时间正序',
+    sortDesc: '时间倒序',
     unitEntries: '条记忆',
     unitKinds: '类',
     labelPinned: '置顶',
@@ -225,13 +231,30 @@ function matchesQuery(card, query) {
   return needle.split(/\s+/).every(word => haystack.includes(word));
 }
 
-/** Preserves the order it was given: the caller already sorted. */
+/** The caller orders via `orderCards`; filtering only preserves that order. */
 function filterCards(cards, { query = '', kind = '', status = '', pinnedOnly = false } = {}) {
   return (cards ?? []).filter(card =>
     (!kind || card.kind === kind)
     && (!status || (status === 'active') === card.active)
     && (!pinnedOnly || card.pinned)
     && matchesQuery(card, query));
+}
+
+/**
+ * Page-side twin of `core.sortCards`: pinned first, then `updated||created`
+ * (newest first, oldest first for `asc`), dateless last, id tiebreak. It
+ * lives here rather than in core because this file is the only one the
+ * browser page may load; keep the two implementations in step.
+ */
+function orderCards(cards, order = 'default') {
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  const dir = order === 'asc' ? 1 : -1;
+  const when = card => String(card.updated || card.created || '');
+  return [...(cards ?? [])].sort((a, b) =>
+    ((b.pinned === true) - (a.pinned === true))
+    || ((!when(a) && when(b)) ? 1 : ((!when(b) && when(a)) ? -1 : 0))
+    || (dir * cmp(when(a), when(b)))
+    || cmp(String(a.id), String(b.id)));
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +377,7 @@ function confirmHtml({ locale = 'en' } = {}) {
 const api = {
   KINDS, TEXT, localeOf, t, kindLabel,
   esc, inline, markdown,
-  matchesQuery, filterCards,
+  matchesQuery, filterCards, orderCards,
   cardHtml, formHtml, statsHtml, emptyHtml, confirmHtml,
 };
 

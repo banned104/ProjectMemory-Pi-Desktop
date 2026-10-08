@@ -245,3 +245,25 @@ test('a failing load says so instead of showing a silent empty screen', async ()
 
   assert.ok(elements.toast.textContent.includes('boom'));
 });
+test('the sort button cycles default, oldest-first, newest-first and reorders the cards', async () => {
+  const { elements, flush } = boot([
+    card('NEW', { created: '2026-09-25' }),
+    card('OLD-PIN', { created: '2026-01-01', pinned: true }),
+    card('MID', { created: '2026-06-01' }),
+  ]);
+  await flush();
+  const filterEvent = filter => ({
+    target: { closest: selector => (selector === '[data-filter]' ? { dataset: { filter } } : null) },
+  });
+  const isOrdered = (...ids) => {
+    const at = ids.map(id => elements.cards.innerHTML.indexOf(`Title ${id}`));
+    return at.every(i => i >= 0) && at.every((v, i) => i === 0 || at[i - 1] < v);
+  };
+  assert.ok(isOrdered('OLD-PIN', 'NEW', 'MID'), 'default: pinned on top, newest first');
+  elements.filters.dispatch('click', filterEvent('sort'));
+  assert.ok(isOrdered('OLD-PIN', 'MID', 'NEW'), 'asc: pinned on top, oldest first');
+  elements.filters.dispatch('click', filterEvent('sort'));
+  assert.ok(isOrdered('OLD-PIN', 'NEW', 'MID'), 'desc: pinned on top, newest first');
+  elements.filters.dispatch('click', filterEvent('sort'));
+  assert.ok(isOrdered('OLD-PIN', 'NEW', 'MID'), 'back to default');
+});

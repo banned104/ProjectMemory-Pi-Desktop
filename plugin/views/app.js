@@ -24,6 +24,7 @@
     kind: '',
     status: '',
     pinnedOnly: false,
+    sort: '',
     editing: null,
     pendingDelete: null,
     busy: false,
@@ -61,6 +62,11 @@
       ['active', label('filterActive')],
       ['retired', label('filterRetired')],
     ];
+    const sorts = [
+      ['', label('sortDefault')],
+      ['asc', label('sortAsc')],
+      ['desc', label('sortDesc')],
+    ];
     el.filters.querySelectorAll('[data-filter]').forEach(button => {
       const filter = button.dataset.filter;
       if (filter === 'pinned') {
@@ -68,6 +74,8 @@
         button.setAttribute('aria-pressed', String(state.pinnedOnly));
       } else if (filter === 'status') {
         button.textContent = options.find(([value]) => value === state.status)?.[1] ?? label('filterAll');
+      } else if (filter === 'sort') {
+        button.textContent = sorts.find(([value]) => value === state.sort)?.[1] ?? label('sortDefault');
       } else {
         button.textContent = ui.kindLabel(state.locale, filter);
         button.setAttribute('aria-pressed', String(state.kind === filter));
@@ -85,7 +93,7 @@
   }
 
   function renderCards() {
-    const visible = ui.filterCards(state.cards, {
+    const visible = ui.filterCards(ui.orderCards(state.cards, state.sort), {
       query: state.query,
       kind: state.kind,
       status: state.status,
@@ -306,6 +314,8 @@
     if (filter === 'pinned') state.pinnedOnly = !state.pinnedOnly;
     else if (filter === 'status') {
       state.status = state.status === '' ? 'active' : state.status === 'active' ? 'retired' : '';
+    } else if (filter === 'sort') {
+      state.sort = state.sort === '' ? 'asc' : state.sort === 'asc' ? 'desc' : '';
     } else state.kind = state.kind === filter ? '' : filter;
     render();
   });

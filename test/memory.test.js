@@ -284,3 +284,23 @@ test('a body-only edit leaves the frontmatter byte-identical', () => {
   assert.ok(head(next).includes('updated: "2026-09-25"'));
   assert.ok(!next.includes('Old body.'));
 });
+test('sortCards keeps pinned cards on top in every order', () => {
+  const cards = [
+    { id: 'NEW', created: '2026-09-25', updated: '', pinned: false },
+    { id: 'OLD-PIN', created: '2026-01-01', updated: '', pinned: true },
+    { id: 'MID', created: '2026-06-01', updated: '', pinned: false },
+  ];
+  assert.deepEqual(memory.sortCards(cards).map(c => c.id), ['OLD-PIN', 'NEW', 'MID']);
+  assert.deepEqual(memory.sortCards(cards, 'desc').map(c => c.id), ['OLD-PIN', 'NEW', 'MID']);
+  assert.deepEqual(memory.sortCards(cards, 'asc').map(c => c.id), ['OLD-PIN', 'MID', 'NEW']);
+});
+
+test('sortCards puts dateless cards last and falls back to id', () => {
+  const cards = [
+    { id: 'B', created: '', updated: '', pinned: false },
+    { id: 'A', created: '2026-02-02', updated: '', pinned: false },
+    { id: 'C', created: '', updated: '', pinned: false },
+  ];
+  assert.deepEqual(memory.sortCards(cards, 'asc').map(c => c.id), ['A', 'B', 'C']);
+  assert.deepEqual(memory.sortCards(cards, 'nonsense').map(c => c.id), ['A', 'B', 'C']);
+});
