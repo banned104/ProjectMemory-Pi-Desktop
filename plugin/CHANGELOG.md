@@ -1,5 +1,21 @@
 # 更新日志
 
+## 0.2.2
+
+**安全加固**（审计发现的纵深防御缺口，无可远程利用的高危漏洞）：
+
+- 写路径对称校验：`memory.update` 与 `commitBatch` 回链补上与删除路径同样的目标复核；语料装载对 list 返回的路径做白名单过滤。
+- `fs-guard` 的 `remove` 加文件类型检查并事后重验 root；pin 表满改 fail-closed，不再静默重锚。
+- `validateItems` 拒绝一批内同 kind+title 重复与双 map；`turnKeys` 按 session 隔离；文件名拒 `:`/NUL/BOM/尾点尾空格；`sortCards` 改 code-unit，与 DESIGN 一致。
+
+**视图时间排序**：
+
+- 筛选行新增三态按钮：默认排序 → 时间正序 → 时间倒序 → 回默认。默认即现状（`updated || created` 倒序，新的在上）；pinned 卡片永远置顶，不参与时间比较。
+
+**卡片语言规范**：
+
+- 新增 `core/language.js`：模型写 `title`/`content`/`keywords` 时遵守——干净终态、完整双字词、标识符保持英文原文、禁字表、不对比句式。规范原文嵌入 `propose` 工具描述（`main.js` 与 `manifest.json` 同一份），GUIDANCE 一句指向；只约束写作者，不做黑名单校验。
+
 ## 0.2.1
 
 修复三处现场报告的缺陷，其中第一处让 `map` 类型完全无法写入。

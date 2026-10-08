@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "pi.project-memory",
   "name": "Project Memory",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "pi.project-memory contributors",
   "license": "MIT",
   "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card. A docked work-panel view lists the project's entries as cards with search, filters, in-place editing, pinning, retiring and deletion.",
