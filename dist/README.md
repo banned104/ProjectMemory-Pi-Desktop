@@ -2,12 +2,12 @@
 
 | 文件 | 大小 | sha256 |
 |---|---|---|
-| `pi.project-memory-0.2.1.piplug` | 188,448 B | `8078ce383b84b291d6898a5d8f010d0c51bfea215f78d444eba6d90ebd281eb7` |
+ | `pi.project-memory-0.2.1.piplug` | 191,841 B | `b2668182826354bff02c46304f9ff5ef069af84fa893f68b48477f4a9938bc78` |
 | `pi.project-memory-0.2.0.piplug` | 181,260 B | `1ad5eb9b14ec8a747ba43e51872481cd3f7360d651a6d08b0d32d503aabf9de5` |
 | `pi.project-memory-0.1.0.piplug` | 123,094 B | `ff736168269373eca164f4366f0474d2f75d9bb84c8ab417f002fb36ad4bb8f1` |
 
-表中数值即当前盘上文件。0.1.0 那行是修复高/中优先级缺陷之后重建的产物（提交 `8a152a3`），
-与首次打包时的字节不同；0.2.1 是修复现场报告的三处缺陷之后重建的产物。
+ 表中数值即当前盘上文件。0.1.0 那行是修复高/中优先级缺陷之后重建的产物（提交 `8a152a3`），
+ 与首次打包时的字节不同；0.2.1 先是修复现场报告的三处缺陷之后重建，又在安全加固（提交 `26b6fec`）之后再次重建，字节与之前不同。
 
 由宿主 `PluginPack` 生成（先跑 `PluginCheck`，两者均通过；唯一警告是高风险的
 `agent.tool.register` / `fs.write` / `fs.delete` 需用户显式授权）。
