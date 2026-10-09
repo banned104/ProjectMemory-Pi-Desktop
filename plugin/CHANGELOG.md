@@ -1,4 +1,13 @@
 # 更新日志
+## 0.2.3
+
+**待确认链路加固**（代码审查发现的状态机与一致性问题）：
+
+- `retireBatch` 幂等：并发双退不再复活已删批次；插件进程写 `done` 前先确认文件还在。
+- 决议持久化：`skip`/`duplicate` 结论随批次写回，部分提交后不再重复提问；预存 `savedAs` 计入 `already`，不再误报 `skipped`。
+- 提交时完整性复核：`ref` 与 id 绑定、`items` 数量与每项 `kind`/`title`/`content`/`keywords` 上限，改写 inbox 文件无法放宽写入。
+- 回链加固：与删除路径同级目录检查，写前重读确认 id 与文件绑定，错配只记 warning 不误标。
+- `inbox.discard` 与 commit 互斥并上报已落盘条目；`memory.list` 的 `pending` 改为未决条目数；卡片提交前按 id 重读新鲜批次；确认面板支持已决展示并跟随工作区/外观切换。
 
 ## 0.2.2
 
