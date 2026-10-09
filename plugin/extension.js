@@ -259,8 +259,18 @@ async function onToolResult(event, ctx, deps = {}) {
     // locales, and the "no such batch" case has no batch to ask.
     let locale = cardLocaleOf(own[0]?.[0]);
     try {
-      const batch = (await core.listBatches(io)).find(candidate => candidate.ref === ref);
-      if (!batch) {
+      const candidate = (await core.listBatches(io)).find(entry => entry.ref === ref);
+      if (!candidate) {
+        reports.push(core.t(locale, 'reportNotFound', ref));
+        continue;
+      }
+      // Re-read by id: the list above can be stale when the panel committed
+      // concurrently. A batch handled in between reports as not found instead
+      // of being written a second time.
+      let batch;
+      try {
+        batch = await core.readBatch(io, candidate.id, candidate.locale);
+      } catch {
         reports.push(core.t(locale, 'reportNotFound', ref));
         continue;
       }

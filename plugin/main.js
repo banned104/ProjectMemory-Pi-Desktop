@@ -231,9 +231,24 @@ async function onPanelInvoke(channel, payload = {}) {
     case 'inbox.commit':
       return commit(payload);
     case 'inbox.discard': {
-      const batch = await core.readBatch(io, payload.batchId, await appLocale());
-      await core.retireBatch(io, batch, { saved: [], skipped: batch.items.length, warnings: [] });
-      return { discarded: batch.items.length };
+      const locale = await appLocale();
+      if (committing.has(payload.batchId)) throw new Error(core.t(locale, 'busy'));
+      committing.add(payload.batchId);
+      try {
+        const batch = await core.readBatch(io, payload.batchId, locale);
+        // Entries this batch already landed (after a partial commit) stay on
+        // disk; report them so the discard is not mistaken for "nothing saved".
+        let already = [];
+        try {
+          already = (await loadCorpus())
+            .filter(entry => entry.batchRef === batch.ref)
+            .map(entry => entry.id);
+        } catch { /* the report stays best-effort */ }
+        await core.retireBatch(io, batch, { saved: [], skipped: batch.items.length, warnings: [] });
+        return { discarded: batch.items.length, already };
+      } finally {
+        committing.delete(payload.batchId);
+      }
     }
     // Project memory view (views/index.html).
     case 'app.getAppearance': {
@@ -256,7 +271,10 @@ async function onPanelInvoke(channel, payload = {}) {
     case 'memory.list': {
       const workspace = await pi.workspace.get();
       const cards = core.sortCards((await loadCorpus()).map(core.cardOf));
-      const pending = workspace ? (await core.listBatches(io)).length : 0;
+      const batches = workspace ? await core.listBatches(io) : [];
+      // Item-level count: one batch can hold several proposals, and a round
+      // can leave some decided and some still waiting.
+      const pending = batches.reduce((n, batch) => n + core.undecidedCount(batch), 0);
       return {
         project: workspace ? { name: workspace.name, path: workspace.path } : null,
         cards,

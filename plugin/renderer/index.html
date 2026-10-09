@@ -115,6 +115,9 @@
     if (item.savedAs) {
       return `<div class="item"><div class="title">${esc(item.title)}</div><span class="badge kind">${esc(tr('savedAs', item.savedAs))}</span></div>`;
     }
+    if (item.decided) {
+      return `<div class="item"><div class="title">${esc(item.title)}</div><span class="badge">${esc(tr('skipped', 1))}</span></div>`;
+    }
     const selected = keyOf(item.decision);
     const options = item.options
       .map(o => `<option value="${esc(o.key)}" ${o.key === selected ? 'selected' : ''}>${esc(o.label)}</option>`)
@@ -225,6 +228,16 @@
   });
 
   window.addEventListener('focus', () => { if (!busy) load(); });
+
+  // The docked view already follows these; without them the panel keeps
+  // showing the previous project after a workspace switch.
+  if (bridge && typeof bridge.on === 'function') {
+    bridge.on('workspace:changed', () => { if (!busy) load(); });
+    bridge.on('appearance:changed', appearance => {
+      try { applyLocale(appearance && appearance.locale); } catch { /* keep current */ }
+      if (!busy) load();
+    });
+  }
 
   (async () => {
     applyLocale('en');

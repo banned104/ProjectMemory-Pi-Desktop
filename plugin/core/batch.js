@@ -7,8 +7,8 @@
 const crypto = require('node:crypto');
 const { normalize, sanitize, clip } = require('./text.js');
 const {
-  MEMORY_DIR, INBOX_DIR, MAP_ID, isActive, loadCorpus, newEntryId, localDate,
-  renderEntry, setFrontmatterFields,
+  MEMORY_DIR, INBOX_DIR, MAP_ID, KINDS, isActive, loadCorpus, newEntryId, localDate,
+  renderEntry, setFrontmatterFields, parseEntry,
 } = require('./entries.js');
 const { search } = require('./search.js');
 const { t, localeOf } = require('./i18n.js');
@@ -26,6 +26,8 @@ const MAX_SIMILAR = 3;
 const MAX_OPTIONS_CHARS = 400;
 
 const BATCH_ID_RE = /^KB-[0-9a-f-]{36}$/;
+/** The short fingerprint carried on the card: 8 hex chars off the batch id. */
+const REF_RE = /^[0-9a-f]{8}$/;
 
 function batchPath(id) {
   if (typeof id !== 'string' || !BATCH_ID_RE.test(id)) throw new Error('invalid batch id');
@@ -35,42 +37,97 @@ function batchPath(id) {
 const optionKey = (action, targetId) => (action === 'create' ? 'create' : `${action}:${targetId}`);
 const replayKey = (kind, title) => `${kind}\u0000${normalize(title)}`;
 
+/** Whether an error is the "no such pending batch" signal, in either locale. */
+const isBatchMissing = error => {
+  const message = String(error?.message ?? '');
+  return message === t('en', 'batchMissing') || message === t('zh-CN', 'batchMissing');
+};
+
 // --- Proposal validation ---------------------------------------------------
 
  function validateItems(items) {
-   if (!Array.isArray(items) || !items.length) throw new Error('items must be a non-empty array');
-   if (items.length > MAX_ITEMS) throw new Error(`at most ${MAX_ITEMS} items per proposal`);
-   const normalized = items.map((item, index) => {
-     const kind = typeof item?.kind === 'string' ? item.kind.trim() : '';
-     if (!['lesson', 'rule', 'decision', 'procedure', 'map', 'preference'].includes(kind)) {
-       throw new Error(`items[${index}].kind must be one of: lesson, rule, decision, procedure, map, preference`);
-     }
-     const title = typeof item?.title === 'string' ? item.title.trim() : '';
-     const content = typeof item?.content === 'string' ? item.content.trim() : '';
-     if (!title) throw new Error(`items[${index}].title is required`);
-     if (!content) throw new Error(`items[${index}].content is required`);
-     if (title.length > MAX_TITLE) throw new Error(`items[${index}].title exceeds ${MAX_TITLE} characters`);
-     if (content.length > MAX_CONTENT) throw new Error(`items[${index}].content exceeds ${MAX_CONTENT} characters`);
-     const keywords = (Array.isArray(item?.keywords) ? item.keywords : [])
-       .filter(k => typeof k === 'string' && k.trim())
-       .map(k => k.trim())
-       .slice(0, MAX_KEYWORDS);
-     return { kind, title, content, keywords, pin: item?.pin === true };
-   });
-   // Two items that replay to the same key collapse onto one landed entry on
-   // retry while getting distinct ids on first write: reject them up front.
-   // Two maps in one batch last-wins on the singleton file for the same reason.
-   const seen = new Set();
-   let maps = 0;
-   normalized.forEach((item, index) => {
-     if (item.kind === 'map') maps += 1;
-     const key = `${item.kind}\u0000${normalize(item.title)}`;
-     if (seen.has(key)) throw new Error(`items[${index}] duplicates an earlier proposal (same kind and title)`);
-     seen.add(key);
-   });
-   if (maps > 1) throw new Error('at most one map item per proposal');
-   return normalized;
- }
+  if (!Array.isArray(items) || !items.length) throw new Error('items must be a non-empty array');
+  if (items.length > MAX_ITEMS) throw new Error(`at most ${MAX_ITEMS} items per proposal`);
+  const normalized = items.map((item, index) => {
+    const kind = typeof item?.kind === 'string' ? item.kind.trim() : '';
+    if (!['lesson', 'rule', 'decision', 'procedure', 'map', 'preference'].includes(kind)) {
+      throw new Error(`items[${index}].kind must be one of: lesson, rule, decision, procedure, map, preference`);
+    }
+    const title = typeof item?.title === 'string' ? item.title.trim() : '';
+    const content = typeof item?.content === 'string' ? item.content.trim() : '';
+    if (!title) throw new Error(`items[${index}].title is required`);
+    if (!content) throw new Error(`items[${index}].content is required`);
+    if (title.length > MAX_TITLE) throw new Error(`items[${index}].title exceeds ${MAX_TITLE} characters`);
+    if (content.length > MAX_CONTENT) throw new Error(`items[${index}].content exceeds ${MAX_CONTENT} characters`);
+    const keywords = (Array.isArray(item?.keywords) ? item.keywords : [])
+      .filter(k => typeof k === 'string' && k.trim())
+      .map(k => k.trim())
+      .slice(0, MAX_KEYWORDS);
+    return { kind, title, content, keywords, pin: item?.pin === true };
+  });
+  // Two items that replay to the same key collapse onto one landed entry on
+  // retry while getting distinct ids on first write: reject them up front.
+  // Two maps in one batch last-wins on the singleton file for the same reason.
+  const seen = new Set();
+  let maps = 0;
+  normalized.forEach((item, index) => {
+    if (item.kind === 'map') maps += 1;
+    const key = `${item.kind}\u0000${normalize(item.title)}`;
+    if (seen.has(key)) throw new Error(`items[${index}] duplicates an earlier proposal (same kind and title)`);
+    seen.add(key);
+  });
+  if (maps > 1) throw new Error('at most one map item per proposal');
+  return normalized;
+}
+
+/**
+ * Fail-closed shape check for a batch about to be committed. `propose` runs
+ * `validateItems` once, but the batch file sits on disk until someone answers,
+ * and anything that rewrites it afterwards must not widen what gets written:
+ * kind/title/content/keywords are re-checked here, against the same limits.
+ */
+function checkBatchItem(item) {
+  if (!item || typeof item !== 'object') return 'not an object';
+  if (!KINDS.includes(item.kind)) return `kind must be one of: ${KINDS.join(', ')}`;
+  if (typeof item.title !== 'string' || !item.title.trim()) return 'title is required';
+  if (item.title.trim().length > MAX_TITLE) return `title exceeds ${MAX_TITLE} characters`;
+  if (typeof item.content !== 'string' || !item.content.trim()) return 'content is required';
+  if (item.content.trim().length > MAX_CONTENT) return `content exceeds ${MAX_CONTENT} characters`;
+  if (item.keywords !== undefined
+    && (!Array.isArray(item.keywords) || item.keywords.length > MAX_KEYWORDS
+      || item.keywords.some(k => typeof k !== 'string'))) {
+    return `at most ${MAX_KEYWORDS} keywords`;
+  }
+  return null;
+}
+
+function assertBatchIntegrity(batch) {
+  const locale = batch?.locale;
+  if (!batch || batch.schema !== 'memory-inbox/1'
+    || typeof batch.id !== 'string' || !BATCH_ID_RE.test(batch.id)
+    || typeof batch.ref !== 'string' || !REF_RE.test(batch.ref)
+    || batch.ref !== batch.id.slice(3, 11)) {
+    throw new Error(t(locale, 'batchMissing'));
+  }
+  if (!Array.isArray(batch.items) || !batch.items.length || batch.items.length > MAX_ITEMS) {
+    throw new Error(`invalid batch ${batch.id}: items must hold 1-${MAX_ITEMS} proposals`);
+  }
+  batch.items.forEach((item, index) => {
+    const bad = checkBatchItem(item);
+    if (bad) throw new Error(`invalid batch ${batch.id} item[${index}]: ${bad}`);
+  });
+}
+
+/**
+ * Items still waiting for a verdict: neither written (`savedAs` from an
+ * earlier round) nor decided without a write (`decided` skip/duplicate mark).
+ * Entries recovered from disk via `batchRef` without either mark are counted
+ * as decided by the caller, not here — this is the cheap display count.
+ */
+function undecidedCount(batch) {
+  if (!batch || !Array.isArray(batch.items)) return 0;
+  return batch.items.filter(item => item && !item.savedAs && !item.decided).length;
+}
 
 /** Same kind only: replacing a lesson with a procedure is never the intent. */
 function findSimilar(entries, item, limit = MAX_SIMILAR) {
@@ -299,7 +356,9 @@ async function readBatch(io, id, locale) {
   // this the panel can commit it again: `batchRef` idempotency then only holds
   // as long as no entry file was deleted in between.
   const status = typeof batch?.status === 'string' ? batch.status.trim() : '';
-  if (batch?.schema !== 'memory-inbox/1' || batch.id !== id || !Array.isArray(batch.items)
+  if (batch?.schema !== 'memory-inbox/1' || batch?.id !== id || !Array.isArray(batch?.items)
+    || !batch.items.length || batch.items.length > MAX_ITEMS
+    || batch.ref !== id.slice(3, 11)
     || (status && status !== 'pending')) {
     throw new Error(t(locale, 'batchMissing'));
   }
@@ -319,7 +378,13 @@ async function listBatches(io) {
     if (file.isDirectory || !match) continue;
     try {
       batches.push(await readBatch(io, match[1], 'en'));
-    } catch { /* a malformed batch is skipped, not fatal for the list */ }
+    } catch (error) {
+      // A handled or malformed batch is hidden. Anything else (a permission
+      // or IO failure) is re-thrown: a silently short list would let the user
+      // believe there is nothing waiting when the read simply failed.
+      if (isBatchMissing(error)) continue;
+      throw error;
+    }
   }
   return batches.sort((a, b) => String(a.createdAt) < String(b.createdAt) ? -1 : String(a.createdAt) > String(b.createdAt) ? 1 : 0);
 }
@@ -328,12 +393,22 @@ async function listBatches(io) {
  * A handled batch is deleted when the io layer can delete, and marked `done`
  * when it cannot (the plugin process has no fs.delete permission, so its
  * `remove` always throws by design).
+ *
+ * Idempotent both ways: when the file is already gone (deleted concurrently by
+ * the other process) it stays gone — writing `done` back would resurrect a
+ * handled batch. The existence check before the `done` write covers the case
+ * where the delete happened between our load and our retire.
  */
 async function retireBatch(io, batch, result) {
   try {
     await io.remove(batchPath(batch.id));
-  } catch {
+    return;
+  } catch (error) {
+    if (isMissingLike(error)) return;
     try {
+      try {
+        if (!(await io.exists(batchPath(batch.id)))) return;
+      } catch { return; }
       await io.writeText(batchPath(batch.id), JSON.stringify({ ...batch, status: 'done', result }, null, 2));
     } catch { /* nothing else to do; the batch simply stays pending */ }
   }
@@ -346,6 +421,12 @@ async function retireBatch(io, batch, result) {
  * An item without a verdict — not selected at all, or answered with free text —
  * is left pending: the batch is retired only once every item has been decided.
  *
+ * A verdict that needs no write (`skip`, `duplicate`) is stamped onto the item
+ * (`decided`) and written back with the batch when siblings are still pending,
+ * so the next round counts it as decided instead of asking again. An item this
+ * batch already wrote (`savedAs`) counts as already saved on retry, never as
+ * skipped.
+ *
  * Idempotency does not depend on the inbox write succeeding: every entry this
  * batch wrote carries `batchRef`, so a retry finds what already landed and
  * adopts it instead of writing a second copy. A replayed item skips target
@@ -356,6 +437,7 @@ async function commitBatch(io, batch, selections, options = {}) {
   const date = options.date ?? localDate();
   const locale = batch.locale;
   if (!Array.isArray(selections)) throw new Error('selections must be an array');
+  assertBatchIntegrity(batch);
 
   const entries = await loadCorpus(io.reader);
   const byId = new Map(entries.map(entry => [entry.id, entry]));
@@ -364,6 +446,11 @@ async function commitBatch(io, batch, selections, options = {}) {
     if (entry.batchRef === batch.ref) landed.set(replayKey(entry.kind, entry.title), entry);
   }
 
+  // Items an earlier round already wrote (persisted `savedAs` by the
+  // write-back below). They count as already saved, never as skipped.
+  const hadSaved = new Set();
+  batch.items.forEach((item, index) => { if (item && item.savedAs) hadSaved.add(index); });
+
   const plan = [];
   const seen = new Set();
   for (const selection of selections) {
@@ -371,10 +458,12 @@ async function commitBatch(io, batch, selections, options = {}) {
     if (!item || seen.has(selection.index)) throw new Error('invalid selection');
     seen.add(selection.index);
     if (item.savedAs) continue;
-    if (selection.key === SKIP_KEY) continue;
+    if (selection.key === SKIP_KEY) { item.decided = SKIP_KEY; continue; }
     const option = item.options.find(candidate => candidate.key === selection.key);
     if (!option) throw new Error(t(locale, 'invalidAction', sanitize(item.title, MAX_TITLE)));
-    if (option.action === 'duplicate') continue;
+    if (option.action === 'duplicate') { item.decided = selection.key; continue; }
+    // A write verdict overrides an earlier skip/duplicate mark on retry.
+    if (item.decided) delete item.decided;
     // An item this batch already wrote in an earlier run needs no validation:
     // it is on disk. Everything below protects a *new* write, and the target a
     // landed item replaced is legitimately retired by now — that must not
@@ -435,24 +524,37 @@ async function commitBatch(io, batch, selections, options = {}) {
       // leaving an earlier partial run half-linked.
       // The map is a singleton: replacing it overwrites the same file, so there
       // is no old entry to retire.
-       if (item.kind !== 'map' && target && (option.action === 'replace' || option.action === 'conflict')) {
-         // Defense in depth: the target came from a just-loaded corpus, but a
-         // hostile lister could have planted a path outside the memory dir.
-         const src = typeof target.source === 'string' ? target.source : '';
-         const safe = src.startsWith(`${MEMORY_DIR}/`) && /\.md$/i.test(src)
-           && !src.includes('..') && !src.includes('\\') && !src.includes(':');
-         if (!safe) {
-           warnings.push(t(locale, 'backlinkFailed', id, target.id, 'invalid target path'));
-         } else try {
-           const raw = await io.readText(target.source);
-           const fields = option.action === 'replace'
-             ? { status: 'deprecated', supersededBy: id }
-             : { related: [...new Set([...target.related, id])] };
-           await io.writeText(target.source, setFrontmatterFields(raw, fields));
-         } catch (error) {
-           warnings.push(t(locale, 'backlinkFailed', id, target.id, String(error?.message ?? error)));
-         }
-       }
+      if (item.kind !== 'map' && target && (option.action === 'replace' || option.action === 'conflict')) {
+        // Same bar as `deleteTarget`, duplicated here because this module
+        // cannot require the view layer (it requires this one). The target
+        // came from a just-loaded corpus, but a hostile lister could have
+        // paired a victim id with another file inside the memory dir.
+        const src = typeof target.source === 'string' ? target.source : '';
+        const prefix = `${MEMORY_DIR}/`;
+        const rest = src.startsWith(prefix) ? src.slice(prefix.length) : '';
+        const pathOk = rest.length > 3 && /\.md$/i.test(src)
+          && !src.includes('..') && !src.includes('\\') && !src.includes('\0') && !src.includes(':')
+          && src.charCodeAt(0) !== 0xFEFF && !src.includes('//')
+          && rest.split('/').every(part => part && part !== '.' && part !== '..'
+            && !part.endsWith('.') && !part.endsWith(' '));
+        if (!pathOk) {
+          warnings.push(t(locale, 'backlinkFailed', id, target.id, 'invalid target path'));
+        } else try {
+          const raw = await io.readText(target.source);
+          // Bind the id to the file: refuse rather than mislabel a file that
+          // became a different entry between the corpus load and this write.
+          if (parseEntry(target.source, raw).id !== target.id) {
+            warnings.push(t(locale, 'backlinkFailed', id, target.id, 'target changed on disk'));
+          } else {
+            const fields = option.action === 'replace'
+              ? { status: 'deprecated', supersededBy: id }
+              : { related: [...new Set([...target.related, id])] };
+            await io.writeText(target.source, setFrontmatterFields(raw, fields));
+          }
+        } catch (error) {
+          warnings.push(t(locale, 'backlinkFailed', id, target.id, String(error?.message ?? error)));
+        }
+      }
     }
   } catch (error) {
     if (saved.length) {
@@ -474,30 +576,58 @@ async function commitBatch(io, batch, selections, options = {}) {
 
   // Every item falls into exactly one of: written now, already on disk from an
   // earlier round of this batch, decided without a write, or still undecided.
-  // "Already on disk" is read from the batchRef scan and not from memory: a
-  // batch re-read from disk carries no `savedAs`, so a second round used to
-  // re-report entries that were plainly there as undecided, and to answer
-  // "nothing was saved" about a batch that had already saved most of itself.
+  // "Already on disk" is read from the batchRef scan and from the persisted
+  // `savedAs` marks — not from memory: a batch re-read from disk after a
+  // partial round must report those entries as already saved rather than as
+  // skipped or pending.
   const keyOf = item => replayKey(item.kind, item.title);
-  // Only the identifying fields: the result is written back into the batch file
-  // when a batch cannot be deleted, and a whole corpus entry would put an 8 KB
-  // body in there for nothing.
-  const already = batch.items
-    .filter((item, index) => !item.savedAs && !seen.has(index) && landed.has(keyOf(item)))
-    .map(item => {
-      const { id, kind, title } = landed.get(keyOf(item));
-      return { id, kind, title };
-    });
-  const pending = batch.items.filter((item, index) =>
-    !item.savedAs && !seen.has(index) && !landed.has(keyOf(item))).length;
+  const savedIdx = new Set(plan.map(p => batch.items.indexOf(p.item)));
+  const already = [];
+  const settled = new Set(savedIdx);
+  batch.items.forEach((item, index) => {
+    if (!item || settled.has(index)) return;
+    if (hadSaved.has(index) && item.savedAs) {
+      const hit = landed.get(keyOf(item));
+      if (hit) already.push({ id: hit.id, kind: hit.kind, title: hit.title });
+      else already.push({ id: item.savedAs, kind: item.kind, title: item.title });
+      settled.add(index);
+      return;
+    }
+    if (!seen.has(index)) {
+      const hit = landed.get(keyOf(item));
+      if (hit) {
+        already.push({ id: hit.id, kind: hit.kind, title: hit.title });
+        settled.add(index);
+      }
+    }
+  });
+  let skipped = 0;
+  batch.items.forEach((item, index) => {
+    if (!item || settled.has(index)) return;
+    if (item.decided) { skipped += 1; settled.add(index); }
+  });
+  const pending = batch.items.length - saved.length - already.length - skipped;
   const result = {
     saved,
     already,
-    skipped: batch.items.length - saved.length - already.length - pending,
+    skipped,
     pending,
     warnings,
   };
-  if (!pending) await retireBatch(io, batch, result);
+  if (pending > 0) {
+    // Remember this round's verdicts (saves and skips alike) so the next round
+    // does not ask again. A write-back failure only costs a repeated question:
+    // the batchRef scan still guards against double writes.
+    if (saved.length || skipped > 0 || already.length) {
+      try {
+        await io.writeText(batchPath(batch.id), JSON.stringify(batch, null, 2));
+      } catch (error) {
+        warnings.push(t(locale, 'inboxWriteFailed', String(error?.message ?? error)));
+      }
+    }
+  } else {
+    await retireBatch(io, batch, result);
+  }
   return result;
 }
 
@@ -526,5 +656,6 @@ module.exports = {
   batchPath, optionKey, replayKey, validateItems, findSimilar, optionsFor,
   heuristicDecision, decisionNote, askOptions, buildBatch, askToolArgs,
   selectionsFromAnswers, readBatch, listBatches, retireBatch, commitBatch, describeResult,
+  assertBatchIntegrity, undecidedCount,
   MAP_ID,
 };
