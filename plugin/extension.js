@@ -42,7 +42,7 @@ When you finish a task that produced knowledge worth reusing, call ${tool('propo
 - \`map\` — the project's module layout, entry points and key paths (one per project; propose an update to refresh it)
 - \`preference\` — a working preference for this project
 
-Write every item under the card language rules in the propose tool description: clean final-state knowledge, complete words of two or more characters, code identifiers in their original English, none of the banned words, and no 「不是……而是……」-style contrast frames. Never propose routine change descriptions, restatements of existing entries, or logs; proposing nothing is normal. ${tool('propose')} writes nothing: it returns arguments for ${ASK_TOOL}; call ${ASK_TOOL} with them unchanged so the user can choose on the card, and the choice is saved automatically. Never edit .workflow/memory files directly.`;
+Write every item under the card language rules in the propose tool description: clean final-state knowledge, complete words of two or more characters, code identifiers in their original English, none of the banned words, and no 「不是……而是……」-style contrast frames. Never propose routine change descriptions, restatements of existing entries, or logs; proposing nothing is normal. When a task ends, ask whether anything reusable came out of it; if so, propose it now instead of leaving it for later — a quiet finish is right only when there was genuinely nothing worth keeping. ${tool('propose')} writes nothing: it returns arguments for ${ASK_TOOL}; call ${ASK_TOOL} with them unchanged so the user can choose on the card, and the choice is saved automatically. Never edit .workflow/memory files directly.`;
 
 /** message key -> { ids: string[], block: string | null } */
 const injections = new Map();
@@ -175,8 +175,10 @@ async function retrieve(cwd, text, exclude, sessionId, deps = {}) {
     : [];
 
   if (!pinned.length && !hits.length) return { ids: [], block: null };
+  const ids = [...pinnedIds, ...hits.map(hit => hit.entry.id)];
+  try { await core.recordHeat(io, ids); } catch { /* advisory: heat must never break a turn */ }
   return {
-    ids: [...pinnedIds, ...hits.map(hit => hit.entry.id)],
+    ids,
     block: core.renderBlock({ pinned, hidden, hits }, tool('load')),
   };
 }

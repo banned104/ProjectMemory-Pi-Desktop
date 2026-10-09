@@ -34,7 +34,7 @@ test('cardOf exposes exactly the fields a card needs, already clipped', () => {
   ));
 
   assert.deepEqual(Object.keys(card).sort(), [
-    'active', 'batchRef', 'chars', 'created', 'id', 'keywords', 'kind', 'pinned',
+    'active', 'batchRef', 'chars', 'created', 'hits', 'id', 'keywords', 'kind', 'lastAccess', 'pinned',
     'pinnedForced', 'related', 'status', 'summary', 'supersededBy', 'title', 'updated',
   ]);
   assert.equal(card.id, 'LES-20260921-config-file');

@@ -30,6 +30,11 @@ const TEXT = {
     sortDefault: 'Default order',
     sortAsc: 'Oldest first',
     sortDesc: 'Newest first',
+    sortHot: 'Most read first',
+    viewGrid: 'Cards',
+    viewTimeline: 'Timeline',
+    reads: 'reads',
+    timelineUndated: 'Undated',
     unitEntries: 'entries',
     unitKinds: 'kinds',
     labelPinned: 'pinned',
@@ -87,6 +92,11 @@ const TEXT = {
     sortDefault: '默认排序',
     sortAsc: '时间正序',
     sortDesc: '时间倒序',
+    sortHot: '热度优先',
+    viewGrid: '卡片',
+    viewTimeline: '时间线',
+    reads: '阅读',
+    timelineUndated: '无日期',
     unitEntries: '条记忆',
     unitKinds: '类',
     labelPinned: '置顶',
@@ -241,20 +251,96 @@ function filterCards(cards, { query = '', kind = '', status = '', pinnedOnly = f
 }
 
 /**
+ * Compact display for a stamp: `MM-DD HH:MM` for datetimes, raw otherwise
+ * (a day-only stamp has nothing shorter to show).
+ */
+function shortWhen(value) {
+  const text = String(value ?? '');
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(text);
+  return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : text;
+}
+
+/** Page-side twin of `core.epochOf`: unparseable means dateless. */
+function pageEpoch(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const at = Date.parse(text);
+  return Number.isFinite(at) ? at : null;
+}
+
+/**
  * Page-side twin of `core.sortCards`: pinned first, then `updated||created`
- * (newest first, oldest first for `asc`), dateless last, id tiebreak. It
- * lives here rather than in core because this file is the only one the
- * browser page may load; keep the two implementations in step.
+ * (newest first, oldest first for `asc`, most-read first for `hot`),
+ * dateless last, id tiebreak. It lives here rather than in core because this
+ * file is the only one the browser page may load; keep the two in step.
  */
 function orderCards(cards, order = 'default') {
   const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  if (order === 'hot') {
+    const heatOf = card => (Number.isFinite(card.hits) ? card.hits : 0);
+    const seenOf = card => pageEpoch(card.lastAccess) ?? -1;
+    return [...(cards ?? [])].sort((a, b) =>
+      ((b.pinned === true) - (a.pinned === true))
+      || (heatOf(b) - heatOf(a))
+      || (seenOf(b) - seenOf(a))
+      || cmp(String(a.id), String(b.id)));
+  }
   const dir = order === 'asc' ? 1 : -1;
   const when = card => String(card.updated || card.created || '');
+  const byTime = (a, b) => {
+    const ea = pageEpoch(when(a));
+    const eb = pageEpoch(when(b));
+    if (ea === null && eb === null) return 0;
+    if (ea === null) return 1;
+    if (eb === null) return -1;
+    return dir * (ea - eb) || cmp(when(a), when(b));
+  };
   return [...(cards ?? [])].sort((a, b) =>
     ((b.pinned === true) - (a.pinned === true))
-    || ((!when(a) && when(b)) ? 1 : ((!when(b) && when(a)) ? -1 : 0))
-    || (dir * cmp(when(a), when(b)))
+    || byTime(a, b)
     || cmp(String(a.id), String(b.id)));
+}
+
+/**
+ * Timeline mode: pure chronological (no pinned-first — a timeline that
+ * reorders itself is not a timeline), grouped under day headers, one row per
+ * entry with HH:MM. An entry being edited renders the same form as the grid.
+ */
+function timelineHtml(cards, { locale = 'en', editing = null } = {}) {
+  const stampOf = card => String(card.updated || card.created || '');
+  const rows = [...(cards ?? [])].sort((a, b) => {
+    const ea = pageEpoch(stampOf(a));
+    const eb = pageEpoch(stampOf(b));
+    if (ea === null && eb === null) return 0;
+    if (ea === null) return 1;
+    if (eb === null) return -1;
+    return (eb - ea) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+  });
+  const out = [];
+  let day = null;
+  for (const card of rows) {
+    if (editing && editing.id === card.id) {
+      out.push(formHtml(editing, { locale }));
+      continue;
+    }
+    const stamp = stampOf(card);
+    const cardDay = stamp.slice(0, 10) || '';
+    if (cardDay !== day) {
+      day = cardDay;
+      out.push(`<h4 class="pm-tl-day">${esc(day || t(locale, 'timelineUndated'))}</h4>`);
+    }
+    const hm = /[T ](\d{2}):(\d{2})/.exec(stamp);
+    const kind = KINDS.includes(card.kind) ? card.kind : 'lesson';
+    out.push([
+      `<div class="pm-tl-row" data-id="${esc(card.id)}">`,
+      `<span class="pm-meta pm-tl-time">${esc(hm ? `${hm[1]}:${hm[2]}` : '--')}</span>`,
+      badge(kindLabel(locale, kind), `pm-kind pm-kind-${kind}`),
+      `<span class="pm-tl-title">${esc(card.title || t(locale, 'untitled'))}</span>`,
+      `<button type="button" class="pm-btn" data-act="edit">${esc(t(locale, 'edit'))}</button>`,
+      `</div>`,
+    ].join(''));
+  }
+  return out.join('');
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +379,10 @@ function cardHtml(card, { locale = 'en' } = {}) {
     keywords ? `<ul class="pm-keywords">${keywords}</ul>` : '',
     `<footer class="pm-card-foot">`,
     `<span class="pm-meta">${esc(card.id)}</span>`,
-    `<time class="pm-meta" datetime="${esc(when)}">${esc(when || '')}</time>`,
+    `<time class="pm-meta" datetime="${esc(when)}">${esc(shortWhen(when || ''))}</time>`,
+    (Number.isFinite(card.hits) && card.hits > 0
+      ? `<span class="pm-meta">${esc(String(card.hits))} ${esc(t(locale, 'reads'))}</span>`
+      : ''),
     `<div class="pm-actions">${actions}</div>`,
     `</footer>`,
     `</article>`,
@@ -376,8 +465,8 @@ function confirmHtml({ locale = 'en' } = {}) {
 
 const api = {
   KINDS, TEXT, localeOf, t, kindLabel,
-  esc, inline, markdown,
-  matchesQuery, filterCards, orderCards,
+  esc, inline, markdown, shortWhen,
+  matchesQuery, filterCards, orderCards, timelineHtml,
   cardHtml, formHtml, statsHtml, emptyHtml, confirmHtml,
 };
 

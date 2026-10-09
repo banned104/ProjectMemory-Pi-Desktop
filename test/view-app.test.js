@@ -245,7 +245,7 @@ test('a failing load says so instead of showing a silent empty screen', async ()
 
   assert.ok(elements.toast.textContent.includes('boom'));
 });
-test('the sort button cycles default, oldest-first, newest-first and reorders the cards', async () => {
+test('the sort button cycles default, oldest-first, newest-first, hot and reorders the cards', async () => {
   const { elements, flush } = boot([
     card('NEW', { created: '2026-09-25' }),
     card('OLD-PIN', { created: '2026-01-01', pinned: true }),
@@ -264,6 +264,8 @@ test('the sort button cycles default, oldest-first, newest-first and reorders th
   assert.ok(isOrdered('OLD-PIN', 'MID', 'NEW'), 'asc: pinned on top, oldest first');
   elements.filters.dispatch('click', filterEvent('sort'));
   assert.ok(isOrdered('OLD-PIN', 'NEW', 'MID'), 'desc: pinned on top, newest first');
+  elements.filters.dispatch('click', filterEvent('sort'));
+  assert.ok(isOrdered('OLD-PIN', 'MID', 'NEW'), 'hot without heat: pinned on top, id tiebreak');
   elements.filters.dispatch('click', filterEvent('sort'));
   assert.ok(isOrdered('OLD-PIN', 'NEW', 'MID'), 'back to default');
 });

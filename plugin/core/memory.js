@@ -54,31 +54,67 @@ function cardOf(entry) {
     related: entry.related.map(value => sanitize(value, 60)),
     batchRef: entry.batchRef ? sanitize(entry.batchRef, 60) : null,
     created: entry.created,
-    updated: entry.updated,
+    // Lazy migration: entries written before 'updated' existed read as
+    // updated === created. The file itself is untouched until the next write.
+    updated: entry.updated || entry.created,
+    hits: Number.isFinite(entry.hits) ? entry.hits : 0,
+    lastAccess: typeof entry.lastAccess === 'string' ? entry.lastAccess : '',
     chars: entry.body.length,
   };
 }
 
 /**
+ * Millis since epoch for a frontmatter stamp. Accepts the old day-only
+ * `YYYY-MM-DD` and the new offset datetime; anything unparseable is dateless.
+ * Epoch (not string) comparison is what keeps mixed offsets chronological.
+ */
+function epochOf(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  let at = Date.parse(text);
+  if (!Number.isFinite(at)) at = Date.parse(`${text}T00:00:00`);
+  return Number.isFinite(at) ? at : null;
+}
+
+/**
  * Card order for the view. Pinned cards always come first; the rest follow
  * `updated || created` — newest first by default (`desc`), oldest first for
- * `asc`. Cards without any date sort last in both directions, and ties stay
- * reproducible by id. Unknown orders fall back to the default.
+ * `asc`, most-read first for `hot`. Cards without any date sort last in both
+ * time directions, and ties stay reproducible by id. Unknown orders fall back
+ * to the default.
  */
-const SORT_ORDERS = ['default', 'asc', 'desc'];
+const SORT_ORDERS = ['default', 'asc', 'desc', 'hot'];
  function sortCards(cards, order = 'default') {
+   if (order === 'hot') {
+     const heatOf = card => (Number.isFinite(card.hits) ? card.hits : 0);
+     const seenOf = card => epochOf(card.lastAccess) ?? -1;
+     return [...cards].sort((a, b) =>
+       ((b.pinned === true) - (a.pinned === true))
+       || (heatOf(b) - heatOf(a))
+       || (seenOf(b) - seenOf(a))
+       || codeUnitCompare(a.id, b.id));
+   }
    const dir = order === 'asc' ? 1 : -1;
    const when = card => String(card.updated || card.created || '');
+   const byTime = (a, b) => {
+     const ea = epochOf(when(a));
+     const eb = epochOf(when(b));
+     if (ea === null && eb === null) return 0;
+     if (ea === null) return 1;
+     if (eb === null) return -1;
+     return dir * (ea - eb) || codeUnitCompare(when(a), when(b));
+   };
    return [...cards].sort((a, b) =>
      ((b.pinned === true) - (a.pinned === true))
-     || ((!when(a) && when(b)) ? 1 : ((!when(b) && when(a)) ? -1 : 0))
-     || (dir * codeUnitCompare(when(a), when(b)))
+     || byTime(a, b)
      || codeUnitCompare(a.id, b.id));
  }
 
 function daysSince(date, now) {
   if (!date) return Infinity;
-  const then = Date.parse(`${date}T00:00:00`);
+  const text = String(date);
+  let then = Date.parse(text);
+  if (!Number.isFinite(then)) then = Date.parse(`${text}T00:00:00`);
   return Number.isFinite(then) ? (now - then) / 86400000 : Infinity;
 }
 
@@ -203,7 +239,7 @@ function fieldsOf(patch, date) {
 
 module.exports = {
   EDITABLE, STATUSES, SORT_ORDERS, MAX_BODY, RECENT_DAYS,
-  cardOf, sortCards, daysSince, statsOf,
+  cardOf, sortCards, daysSince, statsOf, epochOf,
   validatePatch, fieldsOf, deleteTarget,
   // Re-exported so callers do not have to know which core module owns them.
   MEMORY_DIR, KINDS, MAX_TITLE, MAX_CONTENT, MAX_KEYWORDS,

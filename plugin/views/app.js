@@ -25,6 +25,7 @@
     status: '',
     pinnedOnly: false,
     sort: '',
+    view: 'grid',
     editing: null,
     pendingDelete: null,
     busy: false,
@@ -66,6 +67,7 @@
       ['', label('sortDefault')],
       ['asc', label('sortAsc')],
       ['desc', label('sortDesc')],
+      ['hot', label('sortHot')],
     ];
     el.filters.querySelectorAll('[data-filter]').forEach(button => {
       const filter = button.dataset.filter;
@@ -76,6 +78,8 @@
         button.textContent = options.find(([value]) => value === state.status)?.[1] ?? label('filterAll');
       } else if (filter === 'sort') {
         button.textContent = sorts.find(([value]) => value === state.sort)?.[1] ?? label('sortDefault');
+      } else if (filter === 'view') {
+        button.textContent = state.view === 'timeline' ? label('viewTimeline') : label('viewGrid');
       } else {
         button.textContent = ui.kindLabel(state.locale, filter);
         button.setAttribute('aria-pressed', String(state.kind === filter));
@@ -93,17 +97,27 @@
   }
 
   function renderCards() {
-    const visible = ui.filterCards(ui.orderCards(state.cards, state.sort), {
+    const query = {
       query: state.query,
       kind: state.kind,
       status: state.status,
       pinnedOnly: state.pinnedOnly,
-    });
+    };
 
     if (!state.loaded) {
       el.grid.innerHTML = `<p class="pm-loading">${ui.esc(label('loading'))}</p>`;
       return;
     }
+    if (state.view === 'timeline') {
+      const visible = ui.filterCards(state.cards, query);
+      if (!visible.length) {
+        el.grid.innerHTML = ui.emptyHtml(state.cards.length ? 'filtered' : 'empty', { locale: state.locale });
+        return;
+      }
+      el.grid.innerHTML = ui.timelineHtml(visible, { locale: state.locale, editing: state.editing });
+      return;
+    }
+    const visible = ui.filterCards(ui.orderCards(state.cards, state.sort), query);
     if (!visible.length) {
       el.grid.innerHTML = ui.emptyHtml(state.cards.length ? 'filtered' : 'empty', { locale: state.locale });
       return;
@@ -315,7 +329,9 @@
     else if (filter === 'status') {
       state.status = state.status === '' ? 'active' : state.status === 'active' ? 'retired' : '';
     } else if (filter === 'sort') {
-      state.sort = state.sort === '' ? 'asc' : state.sort === 'asc' ? 'desc' : '';
+      state.sort = state.sort === '' ? 'asc' : state.sort === 'asc' ? 'desc' : state.sort === 'desc' ? 'hot' : '';
+    } else if (filter === 'view') {
+      state.view = state.view === 'timeline' ? 'grid' : 'timeline';
     } else state.kind = state.kind === filter ? '' : filter;
     render();
   });

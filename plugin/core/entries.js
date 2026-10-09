@@ -64,12 +64,30 @@ function localDate(now = new Date()) {
 }
 
 /**
+ * Local timestamp with numeric offset, second precision:
+ * `2026-10-09T14:32:05+08:00`. Day-only `localDate` stays for ids and
+ * backwards compatibility; stamps (created/updated) use this.
+ */
+function localDateTime(now = new Date()) {
+  const stamp = now instanceof Date ? now : new Date(now);
+  const pad = n => String(n).padStart(2, '0');
+  const off = -stamp.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const abs = Math.abs(off);
+  return `${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())}`
+    + `T${pad(stamp.getHours())}:${pad(stamp.getMinutes())}:${pad(stamp.getSeconds())}`
+    + `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+
+/**
  * Allocate an id, suffixing `-2`, `-3`, … on collision. Bounded: an unbounded
  * probe loop is how a stuck host turns into a hung turn.
  */
 function newEntryId(kind, title, date, taken) {
   if (kind === 'map') return MAP_ID;
-  const base = `${KIND_PREFIX[kind]}-${String(date).replace(/-/g, '')}-${slug(title)}`;
+  // The id carries a day only; a full stamp would break ID_PATTERN and churn the id on every edit.
+  const day = String(date).slice(0, 10).replace(/-/g, '');
+  const base = `${KIND_PREFIX[kind]}-${day}-${slug(title)}`;
   if (!taken.has(base)) return base;
   for (let n = 2; n <= 999; n += 1) {
     const candidate = `${base}-${n}`;
@@ -163,7 +181,7 @@ function parseEntry(source, raw) {
   return entries;
 }
 
-function renderEntry({ id, kind, title, keywords, content, created, pinned, batchRef, supersedes, related }) {
+function renderEntry({ id, kind, title, keywords, content, created, updated, pinned, batchRef, supersedes, related }) {
   const lines = [
     '---',
     `id: ${yamlString(id)}`,
@@ -172,6 +190,9 @@ function renderEntry({ id, kind, title, keywords, content, created, pinned, batc
     `keywords: ${yamlList(keywords ?? [])}`,
     'status: active',
     `created: ${created}`,
+    // Written at birth (updated equals created): sorting by updated then never
+    // drops a never-edited entry, and no read-time fallback is needed downstream.
+    `updated: ${updated ?? created}`,
   ];
   if (pinned) lines.push('pinned: true');
   if (batchRef) lines.push(`batchRef: ${batchRef}`);
@@ -236,6 +257,6 @@ function rewriteEntry(raw, { fields = {}, body } = {}) {
 module.exports = {
   MEMORY_DIR, INBOX_DIR, MAP_ID, KINDS, KIND_PREFIX, KIND_TAG, INACTIVE, ID_PATTERN,
   MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES, MATCH_BODY_CHARS, MAX_LOAD_CHARS,
-  isMissing, isActive, slug, localDate, newEntryId, parseEntry, loadCorpus,
+  isMissing, isActive, slug, localDate, localDateTime, newEntryId, parseEntry, loadCorpus,
   renderEntry, setFrontmatterFields, setEntryBody, rewriteEntry,
 };

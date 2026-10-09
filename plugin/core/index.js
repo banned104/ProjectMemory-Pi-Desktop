@@ -10,6 +10,7 @@ const batch = require('./batch.js');
 const memory = require('./memory.js');
 const i18n = require('./i18n.js');
 const language = require('./language.js');
+const heat = require('./heat.js');
 
 module.exports = {
   ...text,
@@ -20,6 +21,7 @@ module.exports = {
   // the same value either way (they re-export it for callers that only need one).
   ...memory,
   ...language,
+  ...heat,
   t: i18n.t,
   localeOf: i18n.localeOf,
   MESSAGES: i18n.MESSAGES,

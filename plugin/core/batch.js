@@ -7,7 +7,7 @@
 const crypto = require('node:crypto');
 const { normalize, sanitize, clip } = require('./text.js');
 const {
-  MEMORY_DIR, INBOX_DIR, MAP_ID, KINDS, isActive, loadCorpus, newEntryId, localDate,
+  MEMORY_DIR, INBOX_DIR, MAP_ID, KINDS, isActive, loadCorpus, newEntryId, localDateTime,
   renderEntry, setFrontmatterFields, parseEntry,
 } = require('./entries.js');
 const { search } = require('./search.js');
@@ -434,7 +434,7 @@ async function retireBatch(io, batch, result) {
  * and that must not block the rest of the batch.
  */
 async function commitBatch(io, batch, selections, options = {}) {
-  const date = options.date ?? localDate();
+  const date = options.date ?? localDateTime();
   const locale = batch.locale;
   if (!Array.isArray(selections)) throw new Error('selections must be an array');
   assertBatchIntegrity(batch);
@@ -509,6 +509,7 @@ async function commitBatch(io, batch, selections, options = {}) {
           keywords: item.keywords,
           content: item.content,
           created: date,
+          updated: date,
           pinned: item.pin,
           batchRef: batch.ref,
           supersedes: option.action === 'replace' ? target?.id ?? null : null,
@@ -546,9 +547,11 @@ async function commitBatch(io, batch, selections, options = {}) {
           if (parseEntry(target.source, raw).id !== target.id) {
             warnings.push(t(locale, 'backlinkFailed', id, target.id, 'target changed on disk'));
           } else {
+            // The retired/linked entry moves with the batch: without a fresh
+            // 'updated' it would sink to the bottom of a time-sorted view forever.
             const fields = option.action === 'replace'
-              ? { status: 'deprecated', supersededBy: id }
-              : { related: [...new Set([...target.related, id])] };
+              ? { status: 'deprecated', supersededBy: id, updated: date }
+              : { related: [...new Set([...target.related, id])], updated: date };
             await io.writeText(target.source, setFrontmatterFields(raw, fields));
           }
         } catch (error) {
