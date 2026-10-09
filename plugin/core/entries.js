@@ -126,6 +126,28 @@ function parseEntry(source, raw) {
   };
 }
 
+/**
+ * One pasted entry for cross-project import. Only the reusable substance
+ * travels: kind/title/body/keywords/pin. Identity ('id'), dates, status and
+ * all link fields stay behind — the target project reallocates them on write.
+ * Unknown kinds fall back to lesson (same as parseEntry); empty or oversized
+ * input is refused. Length limits are enforced later by 'validateItems'.
+ */
+const MAX_IMPORT_CHARS = 32 * 1024;
+function parseImportItem(text) {
+  const raw = String(text ?? '');
+  if (!raw.trim()) throw new Error('nothing to import: paste Markdown copied from another project');
+  if (raw.length > MAX_IMPORT_CHARS) throw new Error(`import exceeds ${MAX_IMPORT_CHARS} characters`);
+  const entry = parseEntry('import.md', raw);
+  return {
+    kind: entry.kind,
+    title: entry.title,
+    content: entry.body,
+    keywords: entry.keywords,
+    pin: entry.pinned === true,
+  };
+}
+
  /**
   * A listed path is data from outside this module (host gateway or confined
   * fs). Trusting it verbatim lets a hostile lister pull reads outside the
@@ -259,4 +281,5 @@ module.exports = {
   MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES, MATCH_BODY_CHARS, MAX_LOAD_CHARS,
   isMissing, isActive, slug, localDate, localDateTime, newEntryId, parseEntry, loadCorpus,
   renderEntry, setFrontmatterFields, setEntryBody, rewriteEntry,
+  parseImportItem, MAX_IMPORT_CHARS,
 };

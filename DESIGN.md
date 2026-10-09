@@ -251,7 +251,7 @@ test/               node --test 单元测试
 ### 已知取舍
 
 - `map` 条目按定义始终置顶，界面不给取消置顶的按钮：格式会把它顶回去，给了就是骗人。
-- 时间戳是本地带偏移 ISO8601 到秒（`2026-10-09T14:32:05+08:00`）；新建即写 `updated = created`，回链（替代/关联）顺手刷新 `updated`，老条目读时回退 `created`、写时补。排序按 epoch 比较，混合偏移保持 chronology，`id` 只带天（`YYYYMMDD`）。
+- 跨项目是独立复制：卡片复制按钮导出文件原文，导入框粘贴后进待确认批次；`id`/日期/链接不跨项目，无全局层、无同步。
 - 阅读热度是旁路账本 `.workflow/memory-inbox/.heat.json`（`{id: {hits, lastAccess}}`，读脏回空，上限 2000 条），`search`/`load`/`memory.get`/自动注入时 touch，失败不影响读；视图 `hot` 排序按 hits→lastAccess，时间线模式是纯 chronology 分组（无 pinned 置顶）。
 - 视图的搜索是子串匹配，与 Agent 的检索排序结果不一致，这是有意的。
 - 深浅主题跟随宿主：`app.getAppearance` 的 base 落成 `data-theme`，宿主没解析出偏好时退回 `prefers-color-scheme`。宿主推送的 `appearance:changed` 只带 locale，所以收到它时会再取一次外观。

@@ -276,6 +276,33 @@
       }
       .pm-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-left: auto; }
 
+      /* --- transfer --- */
+      #transfer:empty { display: none; }
+      .pm-transfer {
+        margin: 0 12px 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--pm-accent);
+        border-radius: 10px;
+        background: var(--pm-card);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .pm-transfer h3 { margin: 0; font-size: 13px; }
+      .pm-transfer p { margin: 0; }
+      .pm-transfer textarea {
+        border: 1px solid var(--pm-line);
+        border-radius: 7px;
+        background: var(--pm-bg);
+        color: inherit;
+        font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+        font-size: 12px;
+        padding: 6px 8px;
+        width: 100%;
+        resize: vertical;
+      }
+      .pm-transfer .pm-actions { margin-left: 0; justify-content: flex-end; }
+
       /* --- timeline --- */
       .pm-tl-day {
         grid-column: 1 / -1;
@@ -413,7 +440,10 @@
         <button type="button" class="pm-btn" data-filter="pinned" aria-pressed="false">Pinned only</button>
         <button type="button" class="pm-btn" data-filter="sort" aria-pressed="false">Default order</button>
         <button type="button" class="pm-btn" data-filter="view" aria-pressed="false">Cards</button>
+        <button type="button" class="pm-btn" data-filter="import" aria-pressed="false">Import</button>
       </div>
+
+      <section id="transfer" aria-label="Transfer"></section>
 
       <main id="cards" class="pm-grid"></main>
     </div>

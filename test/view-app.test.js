@@ -51,7 +51,7 @@ function clickEvent({ act, id }) {
 
 function boot(cards = [], { locale = 'zh-CN', base = 'dark' } = {}) {
   const elements = Object.fromEntries(
-    ['root', 'stats', 'cards', 'notice', 'toast', 'overlay', 'search', 'project', 'title', 'refresh', 'filters']
+    ['root', 'stats', 'cards', 'notice', 'toast', 'overlay', 'search', 'project', 'title', 'refresh', 'filters', 'transfer']
       .map(id => [id, fakeElement(id)]),
   );
   const documentListeners = {};
@@ -85,6 +85,15 @@ function boot(cards = [], { locale = 'zh-CN', base = 'dark' } = {}) {
         return { card: { ...(cards.find(card => card.id === payload.id) ?? cards[0]), ...(payload.patch ?? {}) } };
       }
       if (channel === 'memory.delete') return { deleted: payload.id };
+      if (channel === 'memory.export') {
+        const card = cards.find(card => card.id === payload.id);
+        if (!card) throw new Error(`Memory entry not found: ${payload.id}`);
+        return { id: payload.id, markdown: `---\ntitle: "${card.title}"\n---\n\nBody from disk.` };
+      }
+      if (channel === 'memory.import') {
+        if (!String(payload.markdown ?? '').trim()) throw new Error('nothing to import');
+        return { batchId: 'KB-imported', ref: 'imported', count: 1, title: 'Imported' };
+      }
       return {};
     },
     on(event, fn) { (bridge.pushed ??= {})[event] = fn; return () => {}; },
@@ -268,4 +277,56 @@ test('the sort button cycles default, oldest-first, newest-first, hot and reorde
   assert.ok(isOrdered('OLD-PIN', 'MID', 'NEW'), 'hot without heat: pinned on top, id tiebreak');
   elements.filters.dispatch('click', filterEvent('sort'));
   assert.ok(isOrdered('OLD-PIN', 'NEW', 'MID'), 'back to default');
+});
+
+test('copy sends the entry markdown to the clipboard', async () => {
+  const { elements, last, flush } = boot([card('LES-1')]);
+  await flush();
+  let captured = null;
+  const realNavigator = globalThis.navigator;
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { clipboard: { writeText: async text => { captured = text; } } },
+    configurable: true,
+  });
+  try {
+    elements.cards.dispatch('click', clickEvent({ act: 'copy', id: 'LES-1' }));
+    await flush();
+    assert.deepEqual(last('memory.export'), ['memory.export', { id: 'LES-1' }]);
+    assert.ok(String(captured).includes('Body from disk.'));
+    assert.ok(elements.toast.textContent.includes('已复制'));
+  } finally {
+    Object.defineProperty(globalThis, 'navigator', { value: realNavigator, configurable: true });
+  }
+});
+
+test('the import button opens a panel that queues pasted markdown', async () => {
+  const { elements, last, flush } = boot([card('LES-1')]);
+  await flush();
+  const filterEvent = filter => ({
+    target: { closest: selector => (selector === '[data-filter]' ? { dataset: { filter } } : null) },
+  });
+  assert.equal(elements.transfer.innerHTML, '');
+  elements.filters.dispatch('click', filterEvent('import'));
+  assert.ok(elements.transfer.innerHTML.includes('import-text'));
+  elements.transfer.dispatch('input', { target: { name: 'import-text', value: '---\ntitle: "X"\n---\n\nBody text.' } });
+  elements.transfer.dispatch('click', clickEvent({ act: 'import-confirm' }));
+  await flush();
+  const sent = last('memory.import');
+  assert.ok(sent, 'confirm must call memory.import');
+  assert.match(sent[1].markdown, /Body text/);
+  assert.ok(elements.toast.textContent.includes('已放入待确认'));
+  assert.equal(elements.transfer.innerHTML, '', 'the panel closes after queueing');
+});
+
+test('import with nothing pasted warns and calls nothing', async () => {
+  const { elements, channels, flush } = boot([card('LES-1')]);
+  await flush();
+  const filterEvent = filter => ({
+    target: { closest: selector => (selector === '[data-filter]' ? { dataset: { filter } } : null) },
+  });
+  elements.filters.dispatch('click', filterEvent('import'));
+  elements.transfer.dispatch('click', clickEvent({ act: 'import-confirm' }));
+  await flush();
+  assert.ok(!channels().includes('memory.import'));
+  assert.ok(elements.toast.textContent.length > 0);
 });

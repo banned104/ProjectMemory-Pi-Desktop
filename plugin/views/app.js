@@ -26,6 +26,8 @@
     pinnedOnly: false,
     sort: '',
     view: 'grid',
+    importing: false,
+    importText: '',
     editing: null,
     pendingDelete: null,
     busy: false,
@@ -38,6 +40,7 @@
     stats: document.getElementById('stats'),
     grid: document.getElementById('cards'),
     notice: document.getElementById('notice'),
+    transfer: document.getElementById('transfer'),
     toast: document.getElementById('toast'),
     overlay: document.getElementById('overlay'),
     search: document.getElementById('search'),
@@ -80,6 +83,9 @@
         button.textContent = sorts.find(([value]) => value === state.sort)?.[1] ?? label('sortDefault');
       } else if (filter === 'view') {
         button.textContent = state.view === 'timeline' ? label('viewTimeline') : label('viewGrid');
+      } else if (filter === 'import') {
+        button.textContent = label('importView');
+        button.setAttribute('aria-pressed', String(state.importing));
       } else {
         button.textContent = ui.kindLabel(state.locale, filter);
         button.setAttribute('aria-pressed', String(state.kind === filter));
@@ -128,9 +134,17 @@
         : ui.cardHtml(card, { locale: state.locale }))).join('');
   }
 
+  function renderTransfer() {
+    if (!el.transfer) return;
+    el.transfer.innerHTML = state.importing
+      ? ui.importHtml({ locale: state.locale, text: state.importText })
+      : '';
+  }
+
   function render() {
     renderChrome();
     renderStats();
+    renderTransfer();
     renderCards();
     el.overlay.innerHTML = state.pendingDelete
       ? ui.confirmHtml({ locale: state.locale })
@@ -223,6 +237,62 @@
     }
   }
 
+  /** Clipboard with a fallback for pages without the async API. */
+  function writeClipboard(text) {
+    const nav = typeof navigator !== 'undefined' ? navigator : globalThis.navigator;
+    if (nav && nav.clipboard && typeof nav.clipboard.writeText === 'function') {
+      return nav.clipboard.writeText(String(text));
+    }
+    const doc = typeof document !== 'undefined' ? document : null;
+    if (!doc || typeof doc.createElement !== 'function' || !doc.body) {
+      throw new Error('clipboard unavailable');
+    }
+    const area = doc.createElement('textarea');
+    area.value = String(text);
+    doc.body.appendChild(area);
+    area.select();
+    try {
+      if (typeof doc.execCommand !== 'function' || !doc.execCommand('copy')) {
+        throw new Error('clipboard unavailable');
+      }
+    } finally {
+      if (typeof area.remove === 'function') area.remove();
+    }
+  }
+
+  async function copyCard(card) {
+    state.busy = true;
+    try {
+      const exported = await call('memory.export', { id: card.id });
+      await writeClipboard(exported.markdown);
+      say(label('copied'));
+    } catch (error) {
+      say(`${label('failed')}: ${error?.message ?? error}`, true);
+    } finally {
+      state.busy = false;
+    }
+  }
+
+  async function confirmImport() {
+    if (!state.importText.trim()) {
+      say(label('importEmpty'), true);
+      return;
+    }
+    state.busy = true;
+    try {
+      const result = await call('memory.import', { markdown: state.importText });
+      state.importText = '';
+      state.importing = false;
+      render();
+      void refreshStatsOnly();
+      say(`${label('importQueued')}: ${result.title}`);
+    } catch (error) {
+      say(`${label('failed')}: ${error?.message ?? error}`, true);
+    } finally {
+      state.busy = false;
+    }
+  }
+
   async function removePending() {
     const card = state.pendingDelete;
     if (!card) return;
@@ -269,6 +339,9 @@
           void applyPatch(card, { status: card.active ? 'retired' : 'active' }, label('saved'));
         }
         break;
+      case 'copy':
+        if (!state.busy) void copyCard(card);
+        break;
       case 'delete':
         state.pendingDelete = card;
         state.editing = null;
@@ -312,6 +385,26 @@
     if (event.target.closest('[data-act="open-review"]')) void call('memory.openReview').catch(() => {});
   });
 
+  if (el.transfer) {
+    el.transfer.addEventListener('input', event => {
+      const target = event.target;
+      if (target && (target.name === 'import-text'
+        || (typeof target.closest === 'function' && target.closest('textarea')))) {
+        state.importText = String(target.value ?? '');
+      }
+    });
+    el.transfer.addEventListener('click', event => {
+      const action = event.target.closest('[data-act]');
+      if (!action) return;
+      if (action.dataset.act === 'import-confirm') void confirmImport();
+      else if (action.dataset.act === 'cancel') {
+        state.importing = false;
+        state.importText = '';
+        render();
+      }
+    });
+  }
+
   let searchTimer = 0;
   el.search.addEventListener('input', () => {
     window.clearTimeout(searchTimer);
@@ -332,6 +425,8 @@
       state.sort = state.sort === '' ? 'asc' : state.sort === 'asc' ? 'desc' : state.sort === 'desc' ? 'hot' : '';
     } else if (filter === 'view') {
       state.view = state.view === 'timeline' ? 'grid' : 'timeline';
+    } else if (filter === 'import') {
+      state.importing = !state.importing;
     } else state.kind = state.kind === filter ? '' : filter;
     render();
   });
@@ -370,6 +465,8 @@
       bridge.on('workspace:changed', () => {
         state.editing = null;
         state.pendingDelete = null;
+        state.importing = false;
+        state.importText = '';
         void refresh();
       });
     }

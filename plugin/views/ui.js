@@ -45,6 +45,15 @@ const TEXT = {
     edit: 'Edit',
     save: 'Save',
     cancel: 'Cancel',
+    copy: 'Copy',
+    copied: 'Copied — paste it into the other project\u2019s import box',
+    importView: 'Import',
+    importTitle: 'Import a copied entry',
+    importHint: 'Paste Markdown copied from another project\u2019s Copy button. It becomes a pending proposal — nothing is written until you confirm it in Review proposals.',
+    importPlaceholder: 'Paste copied Markdown here…',
+    importConfirm: 'Queue for review',
+    importQueued: 'Queued for review — confirm it in Review proposals',
+    importEmpty: 'Paste something first',
     retire: 'Retire',
     restore: 'Restore',
     delete: 'Delete',
@@ -107,6 +116,15 @@ const TEXT = {
     edit: '编辑',
     save: '保存',
     cancel: '取消',
+    copy: '复制',
+    copied: '已复制——去另一个项目的导入框粘贴',
+    importView: '导入',
+    importTitle: '导入复制的条目',
+    importHint: '粘贴从另一个项目的复制按钮拿到的 Markdown。它会进入待确认——在确认面板通过之前不会写入。',
+    importPlaceholder: '在此粘贴复制的 Markdown…',
+    importConfirm: '放入待确认',
+    importQueued: '已放入待确认——去确认面板完成导入',
+    importEmpty: '先粘贴内容',
     retire: '停用',
     restore: '恢复',
     delete: '删除',
@@ -336,6 +354,7 @@ function timelineHtml(cards, { locale = 'en', editing = null } = {}) {
       `<span class="pm-meta pm-tl-time">${esc(hm ? `${hm[1]}:${hm[2]}` : '--')}</span>`,
       badge(kindLabel(locale, kind), `pm-kind pm-kind-${kind}`),
       `<span class="pm-tl-title">${esc(card.title || t(locale, 'untitled'))}</span>`,
+      `<button type="button" class="pm-btn" data-act="copy">${esc(t(locale, 'copy'))}</button>`,
       `<button type="button" class="pm-btn" data-act="edit">${esc(t(locale, 'edit'))}</button>`,
       `</div>`,
     ].join(''));
@@ -364,6 +383,7 @@ function cardHtml(card, { locale = 'en' } = {}) {
 
   const actions = [
     `<button type="button" class="pm-btn" data-act="edit">${esc(t(locale, 'edit'))}</button>`,
+    `<button type="button" class="pm-btn" data-act="copy">${esc(t(locale, 'copy'))}</button>`,
     card.pinnedForced
       ? ''
       : `<button type="button" class="pm-btn" data-act="toggle-pin">${esc(t(locale, card.pinned ? 'unpin' : 'pin'))}</button>`,
@@ -423,6 +443,23 @@ function formHtml(card, { locale = 'en' } = {}) {
   ].join('');
 }
 
+/**
+ * The cross-project import panel. Rendered into #transfer when open; the text
+ * lives in app.js state (never re-rendered on keystroke, so focus survives).
+ */
+function importHtml({ locale = 'en', text = '' } = {}) {
+  return [
+    `<div class="pm-transfer">`,
+    `<h3>${esc(t(locale, 'importTitle'))}</h3>`,
+    `<p class="pm-meta">${esc(t(locale, 'importHint'))}</p>`,
+    `<textarea name="import-text" rows="8" placeholder="${esc(t(locale, 'importPlaceholder'))}">${esc(text)}</textarea>`,
+    `<div class="pm-actions">`,
+    `<button type="button" class="pm-btn pm-primary" data-act="import-confirm">${esc(t(locale, 'importConfirm'))}</button>`,
+    `<button type="button" class="pm-btn" data-act="cancel">${esc(t(locale, 'cancel'))}</button>`,
+    `</div></div>`,
+  ].join('');
+}
+
 function statsHtml(stats, { locale = 'en' } = {}) {
   const cell = (value, label) =>
     `<div class="pm-stat"><strong>${esc(String(value))}</strong><span>${esc(label)}</span></div>`;
@@ -466,7 +503,7 @@ function confirmHtml({ locale = 'en' } = {}) {
 const api = {
   KINDS, TEXT, localeOf, t, kindLabel,
   esc, inline, markdown, shortWhen,
-  matchesQuery, filterCards, orderCards, timelineHtml,
+  matchesQuery, filterCards, orderCards, timelineHtml, importHtml,
   cardHtml, formHtml, statsHtml, emptyHtml, confirmHtml,
 };
 

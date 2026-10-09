@@ -298,6 +298,29 @@ async function onPanelInvoke(channel, payload = {}) {
       await touchHeat([entry.id]);
       return { card: core.cardOf(entry), body: entry.body };
     }
+    // Cross-project copy: the exact file text, for the clipboard. Importing
+    // drops identity/dates/links and reallocates them (see parseImportItem).
+    case 'memory.export': {
+      const entry = await findEntry(payload.id);
+      return { id: entry.id, markdown: await io.readText(core.deleteTarget(entry.source)) };
+    }
+    // Cross-project import: pasted Markdown becomes a pending batch, confirmed
+    // in the review panel like any other proposal. Nothing reaches memory here.
+    case 'memory.import': {
+      const locale = await appLocale();
+      const item = core.validateItems([core.parseImportItem(payload.markdown)])[0];
+      const entries = await loadCorpus();
+      const batch = core.buildBatch({
+        prepared: [{ item, similar: core.findSimilar(entries, item) }],
+        locale,
+        sessionId: null,
+      });
+      if (!(await io.exists(`${core.INBOX_DIR}/.gitignore`))) {
+        await pi.fs.writeText(`${core.INBOX_DIR}/.gitignore`, '*\n');
+      }
+      await pi.fs.writeText(core.batchPath(batch.id), JSON.stringify(batch, null, 2));
+      return { batchId: batch.id, ref: batch.ref, count: 1, title: item.title };
+    }
      case 'memory.update': {
        const entry = await findEntry(payload.id);
        const changes = core.validatePatch(payload.patch);
