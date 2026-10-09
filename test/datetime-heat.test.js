@@ -149,6 +149,17 @@ test('shortWhen compacts datetimes and leaves day-only stamps alone', () => {
   assert.equal(ui.shortWhen(''), '');
 });
 
+test('timelineHtml renders the day header even when the only row is being edited', () => {
+  const c = {
+    id: 'A', kind: 'lesson', title: 'Alpha', summary: '', keywords: [], status: 'active', active: true,
+    pinned: false, pinnedForced: false, supersededBy: null, related: [], batchRef: null,
+    created: '2026-10-09T14:32:05+08:00', updated: '', chars: 1,
+  };
+  const html = ui.timelineHtml([c], { locale: 'en', editing: { ...c, body: 'draft' } });
+  assert.ok(html.includes('pm-tl-day'), 'the day header must not be swallowed by the edited row');
+  assert.ok(html.includes('<form'));
+});
+
 test('timelineHtml groups by day, newest first, with HH:MM rows', () => {
   const cards = [
     { id: 'B', kind: 'lesson', title: 'Beta', summary: '', keywords: [], status: 'active', active: true, pinned: false, pinnedForced: false, supersededBy: null, related: [], batchRef: null, created: '2026-10-08T09:00:00+08:00', updated: '', chars: 1 },

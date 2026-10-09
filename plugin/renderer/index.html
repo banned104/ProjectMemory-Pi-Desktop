@@ -176,12 +176,16 @@
     if (busy) return;
     busy = true;
     document.querySelectorAll('button').forEach(b => { b.disabled = true; });
-    try { await run(); }
+    let ok = false;
+    try { await run(); ok = true; }
     catch (error) { show('error', esc(error.message || error)); }
     finally {
       busy = false;
       document.querySelectorAll('button').forEach(b => { b.disabled = false; });
-      await load();
+      // A failed action leaves the DOM as the user arranged it (checkboxes and
+      // selects included) so the choice can be corrected and retried; only
+      // success reloads the list.
+      if (ok) await load();
     }
   }
 

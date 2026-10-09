@@ -60,9 +60,7 @@ const TEXT = {
     pin: 'Pin',
     unpin: 'Unpin',
     pinnedByKind: 'A map entry is always pinned.',
-    deleteTitle: 'Delete this entry?',
-    deleteBody: 'The file is removed from .workflow/memory. This cannot be undone.',
-    deleteConfirm: 'Delete',
+    confirmDelete: 'Confirm delete?',
     fieldTitle: 'Title',
     fieldKind: 'Kind',
     fieldKeywords: 'Keywords, comma separated',
@@ -131,9 +129,7 @@ const TEXT = {
     pin: '置顶',
     unpin: '取消置顶',
     pinnedByKind: 'map 记忆按定义始终置顶。',
-    deleteTitle: '删除这条记忆？',
-    deleteBody: '文件会从 .workflow/memory 删除，无法撤销。',
-    deleteConfirm: '删除',
+    confirmDelete: '确认删除？',
     fieldTitle: '标题',
     fieldKind: '类型',
     fieldKeywords: '关键词，逗号分隔',
@@ -324,7 +320,7 @@ function orderCards(cards, order = 'default') {
  * reorders itself is not a timeline), grouped under day headers, one row per
  * entry with HH:MM. An entry being edited renders the same form as the grid.
  */
-function timelineHtml(cards, { locale = 'en', editing = null } = {}) {
+function timelineHtml(cards, { locale = 'en', editing = null, confirmingDeleteId = null } = {}) {
   const stampOf = card => String(card.updated || card.created || '');
   const rows = [...(cards ?? [])].sort((a, b) => {
     const ea = pageEpoch(stampOf(a));
@@ -337,15 +333,15 @@ function timelineHtml(cards, { locale = 'en', editing = null } = {}) {
   const out = [];
   let day = null;
   for (const card of rows) {
-    if (editing && editing.id === card.id) {
-      out.push(formHtml(editing, { locale }));
-      continue;
-    }
     const stamp = stampOf(card);
     const cardDay = stamp.slice(0, 10) || '';
     if (cardDay !== day) {
       day = cardDay;
       out.push(`<h4 class="pm-tl-day">${esc(day || t(locale, 'timelineUndated'))}</h4>`);
+    }
+    if (editing && editing.id === card.id) {
+      out.push(formHtml(editing, { locale }));
+      continue;
     }
     const hm = /[T ](\d{2}):(\d{2})/.exec(stamp);
     const kind = KINDS.includes(card.kind) ? card.kind : 'lesson';
@@ -356,6 +352,9 @@ function timelineHtml(cards, { locale = 'en', editing = null } = {}) {
       `<span class="pm-tl-title">${esc(card.title || t(locale, 'untitled'))}</span>`,
       `<button type="button" class="pm-btn" data-act="copy">${esc(t(locale, 'copy'))}</button>`,
       `<button type="button" class="pm-btn" data-act="edit">${esc(t(locale, 'edit'))}</button>`,
+      (card.id === confirmingDeleteId
+        ? `<button type="button" class="pm-btn pm-danger" data-act="delete-confirm">${esc(t(locale, 'confirmDelete'))}</button>`
+        : `<button type="button" class="pm-btn pm-danger" data-act="delete">${esc(t(locale, 'delete'))}</button>`),
       `</div>`,
     ].join(''));
   }
@@ -368,7 +367,7 @@ function timelineHtml(cards, { locale = 'en', editing = null } = {}) {
 
 const badge = (label, className) => `<span class="pm-badge ${className}">${esc(label)}</span>`;
 
-function cardHtml(card, { locale = 'en' } = {}) {
+function cardHtml(card, { locale = 'en', confirmingDelete = false } = {}) {
   const when = card.updated || card.created;
   const kind = KINDS.includes(card.kind) ? card.kind : 'lesson';
   const title = card.title || t(locale, 'untitled');
@@ -388,7 +387,9 @@ function cardHtml(card, { locale = 'en' } = {}) {
       ? ''
       : `<button type="button" class="pm-btn" data-act="toggle-pin">${esc(t(locale, card.pinned ? 'unpin' : 'pin'))}</button>`,
     `<button type="button" class="pm-btn" data-act="toggle-status">${esc(t(locale, card.active ? 'retire' : 'restore'))}</button>`,
-    `<button type="button" class="pm-btn pm-danger" data-act="delete">${esc(t(locale, 'delete'))}</button>`,
+    confirmingDelete
+      ? `<button type="button" class="pm-btn pm-danger" data-act="delete-confirm">${esc(t(locale, 'confirmDelete'))}</button>`
+      : `<button type="button" class="pm-btn pm-danger" data-act="delete">${esc(t(locale, 'delete'))}</button>`,
   ].join('');
 
   return [
@@ -487,24 +488,11 @@ function emptyHtml(kind, { locale = 'en' } = {}) {
   ].join('');
 }
 
-function confirmHtml({ locale = 'en' } = {}) {
-  return [
-    `<div class="pm-overlay" hidden>`,
-    `<div class="pm-dialog" role="dialog" aria-modal="true" aria-label="${esc(t(locale, 'deleteTitle'))}">`,
-    `<h3>${esc(t(locale, 'deleteTitle'))}</h3>`,
-    `<p>${esc(t(locale, 'deleteBody'))}</p>`,
-    `<div class="pm-actions">`,
-    `<button type="button" class="pm-btn pm-danger" data-act="confirm-delete">${esc(t(locale, 'deleteConfirm'))}</button>`,
-    `<button type="button" class="pm-btn" data-act="cancel-delete">${esc(t(locale, 'cancel'))}</button>`,
-    `</div></div></div>`,
-  ].join('');
-}
-
 const api = {
   KINDS, TEXT, localeOf, t, kindLabel,
   esc, inline, markdown, shortWhen,
   matchesQuery, filterCards, orderCards, timelineHtml, importHtml,
-  cardHtml, formHtml, statsHtml, emptyHtml, confirmHtml,
+  cardHtml, formHtml, statsHtml, emptyHtml,
 };
 
 // Both the browser page and the Node test runner load this file. Only the

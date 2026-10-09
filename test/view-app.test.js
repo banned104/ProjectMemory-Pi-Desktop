@@ -51,7 +51,7 @@ function clickEvent({ act, id }) {
 
 function boot(cards = [], { locale = 'zh-CN', base = 'dark' } = {}) {
   const elements = Object.fromEntries(
-    ['root', 'stats', 'cards', 'notice', 'toast', 'overlay', 'search', 'project', 'title', 'refresh', 'filters', 'transfer']
+    ['root', 'stats', 'cards', 'notice', 'toast', 'search', 'project', 'title', 'refresh', 'filters', 'transfer']
       .map(id => [id, fakeElement(id)]),
   );
   const documentListeners = {};
@@ -172,32 +172,113 @@ test('retire and restore are the same button with opposite payloads', async () =
   assert.deepEqual(last('memory.update'), ['memory.update', { id: 'LES-1', patch: { status: 'retired' } }]);
 });
 
-test('delete is confirmed first, and Escape backs out without deleting', async () => {
+test('delete flips the button in place; an outside click restores it', async () => {
   const { elements, channels, document, flush } = boot([card('LES-1')]);
   await flush();
 
   elements.cards.dispatch('click', clickEvent({ act: 'delete', id: 'LES-1' }));
-  assert.ok(elements.overlay.innerHTML.includes('删除这条记忆？'), 'the dialog must name what it will do');
-  assert.ok(elements.overlay.hidden === false);
+  assert.ok(elements.cards.innerHTML.includes('data-act="delete-confirm"'), 'the button flips to an inline confirm');
+  assert.ok(elements.cards.innerHTML.includes('确认删除？'));
   assert.ok(!channels().includes('memory.delete'), 'a click on delete must not delete');
 
-  document.dispatch('keydown', { key: 'Escape' });
+  document.dispatch('click', clickEvent({}));
+  assert.ok(!elements.cards.innerHTML.includes('data-act="delete-confirm"'), 'an outside click restores the button');
   assert.ok(!channels().includes('memory.delete'));
 });
 
-test('confirming the dialog deletes the entry and takes it off the screen', async () => {
-  const { elements, channels, last, flush } = boot([card('LES-1'), card('LES-2')]);
+test('Escape still backs out of a pending delete', async () => {
+  const { elements, channels, document, flush } = boot([card('LES-1')]);
+  await flush();
+  elements.cards.dispatch('click', clickEvent({ act: 'delete', id: 'LES-1' }));
+  document.dispatch('keydown', { key: 'Escape' });
+  assert.ok(!elements.cards.innerHTML.includes('data-act="delete-confirm"'));
+  assert.ok(!channels().includes('memory.delete'));
+});
+
+test('clicking the flipped button again deletes and takes the card off the screen', async () => {
+  const { elements, last, flush } = boot([card('LES-1'), card('LES-2')]);
   await flush();
 
   elements.cards.dispatch('click', clickEvent({ act: 'delete', id: 'LES-1' }));
-  elements.overlay.dispatch('click', clickEvent({ act: 'confirm-delete' }));
+  elements.cards.dispatch('click', clickEvent({ act: 'delete-confirm', id: 'LES-1' }));
   await flush();
 
-  assert.ok(channels().includes('memory.delete'));
   assert.deepEqual(last('memory.delete'), ['memory.delete', { id: 'LES-1' }]);
   assert.ok(!elements.cards.innerHTML.includes('Title LES-1'));
   assert.ok(elements.cards.innerHTML.includes('Title LES-2'));
-  assert.equal(elements.overlay.hidden, true);
+  assert.ok(!elements.cards.innerHTML.includes('delete-confirm'), 'the flip cleared with the delete');
+});
+
+test('a pending delete follows the card whose delete was clicked last', async () => {
+  const { elements, flush } = boot([card('LES-1'), card('LES-2')]);
+  await flush();
+  elements.cards.dispatch('click', clickEvent({ act: 'delete', id: 'LES-1' }));
+  elements.cards.dispatch('click', clickEvent({ act: 'delete', id: 'LES-2' }));
+  const html = elements.cards.innerHTML;
+  const flips = html.split('data-act="delete-confirm"').length - 1;
+  assert.equal(flips, 1, 'only one card carries the confirm flip at a time');
+  assert.ok(html.indexOf('Title LES-2') < html.indexOf('data-act="delete-confirm"'), 'the flip is on the last clicked card');
+});
+
+test('a double click on import-confirm queues the batch once', async () => {
+  const { elements, channels, flush } = boot([card('LES-1')]);
+  await flush();
+  const filterEvent = filter => ({
+    target: { closest: selector => (selector === '[data-filter]' ? { dataset: { filter } } : null) },
+  });
+  elements.filters.dispatch('click', filterEvent('import'));
+  elements.transfer.dispatch('input', { target: { name: 'import-text', value: '---\ntitle: "X"\n---\n\nBody.' } });
+  elements.transfer.dispatch('click', clickEvent({ act: 'import-confirm' }));
+  elements.transfer.dispatch('click', clickEvent({ act: 'import-confirm' }));
+  await flush();
+  assert.equal(channels().filter(channel => channel === 'memory.import').length, 1);
+});
+
+test('mutating another card keeps the open editor', async () => {
+  const { elements, flush } = boot([card('LES-1'), card('LES-2')]);
+  await flush();
+  elements.cards.dispatch('click', clickEvent({ act: 'edit', id: 'LES-1' }));
+  await flush();
+  elements.cards.dispatch('click', clickEvent({ act: 'toggle-pin', id: 'LES-2' }));
+  await flush();
+  assert.ok(elements.cards.innerHTML.includes('<form'), 'the editor for LES-1 stays open');
+  assert.ok(elements.cards.innerHTML.includes('Body from disk.'));
+});
+
+test('deleting another card keeps the open editor, and the flip never hides the form path', async () => {
+  const { elements, flush } = boot([card('LES-1'), card('LES-2')]);
+  await flush();
+  elements.cards.dispatch('click', clickEvent({ act: 'edit', id: 'LES-1' }));
+  await flush();
+  elements.cards.dispatch('click', clickEvent({ act: 'delete', id: 'LES-2' }));
+  assert.ok(elements.cards.innerHTML.includes('<form'), 'the editor for LES-1 stays open');
+  assert.ok(elements.cards.innerHTML.includes('data-act="delete-confirm"'));
+});
+
+test('a workspace switch clears a pending delete flip', async () => {
+  const { elements, bridge, flush } = boot([card('LES-1')]);
+  await flush();
+  elements.cards.dispatch('click', clickEvent({ act: 'delete', id: 'LES-1' }));
+  assert.ok(elements.cards.innerHTML.includes('data-act="delete-confirm"'));
+  bridge.pushed['workspace:changed']();
+  await flush();
+  assert.ok(!elements.cards.innerHTML.includes('data-act="delete-confirm"'));
+});
+
+test('timeline rows delete through the same inline confirm', async () => {
+  const { elements, last, flush } = boot([card('LES-1')]);
+  await flush();
+  const filterEvent = filter => ({
+    target: { closest: selector => (selector === '[data-filter]' ? { dataset: { filter } } : null) },
+  });
+  elements.filters.dispatch('click', filterEvent('view'));
+  assert.ok(elements.cards.innerHTML.includes('pm-tl-row'), 'the timeline is on screen');
+  assert.ok(elements.cards.innerHTML.includes('data-act="delete"'));
+  elements.cards.dispatch('click', clickEvent({ act: 'delete', id: 'LES-1' }));
+  assert.ok(elements.cards.innerHTML.includes('data-act="delete-confirm"'));
+  elements.cards.dispatch('click', clickEvent({ act: 'delete-confirm', id: 'LES-1' }));
+  await flush();
+  assert.deepEqual(last('memory.delete'), ['memory.delete', { id: 'LES-1' }]);
 });
 
 test('opening the editor asks for the body and renders the form', async () => {

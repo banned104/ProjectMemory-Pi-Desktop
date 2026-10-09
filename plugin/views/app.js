@@ -42,7 +42,6 @@
     notice: document.getElementById('notice'),
     transfer: document.getElementById('transfer'),
     toast: document.getElementById('toast'),
-    overlay: document.getElementById('overlay'),
     search: document.getElementById('search'),
     project: document.getElementById('project'),
     title: document.getElementById('title'),
@@ -103,6 +102,7 @@
   }
 
   function renderCards() {
+    captureEditingForm();
     const query = {
       query: state.query,
       kind: state.kind,
@@ -120,7 +120,11 @@
         el.grid.innerHTML = ui.emptyHtml(state.cards.length ? 'filtered' : 'empty', { locale: state.locale });
         return;
       }
-      el.grid.innerHTML = ui.timelineHtml(visible, { locale: state.locale, editing: state.editing });
+      el.grid.innerHTML = ui.timelineHtml(visible, {
+        locale: state.locale,
+        editing: state.editing,
+        confirmingDeleteId: state.pendingDelete,
+      });
       return;
     }
     const visible = ui.filterCards(ui.orderCards(state.cards, state.sort), query);
@@ -131,29 +135,65 @@
     el.grid.innerHTML = visible.map(card =>
       (state.editing && state.editing.id === card.id
         ? ui.formHtml(state.editing, { locale: state.locale })
-        : ui.cardHtml(card, { locale: state.locale }))).join('');
+        : ui.cardHtml(card, {
+          locale: state.locale,
+          confirmingDelete: state.pendingDelete === card.id,
+        }))).join('');
   }
 
+  /**
+   * The editor form is rebuilt from the state snapshot on every render, so
+   * whatever the user typed since opening it lives only in the DOM. Fold it
+   * back into the snapshot before any re-render, or a search keystroke or a
+   * filter click would silently discard the draft.
+   */
+  function captureEditingForm() {
+    if (!state.editing) return;
+    const form = el.grid.querySelector ? el.grid.querySelector('.pm-form') : null;
+    if (!form || typeof FormData === 'undefined') return;
+    const data = new FormData(form);
+    const pinned = form.querySelector('[name="pinned"]');
+    state.editing = {
+      ...state.editing,
+      title: String(data.get('title') ?? state.editing.title),
+      kind: String(data.get('kind') ?? state.editing.kind),
+      status: String(data.get('status') ?? 'active'),
+      keywords: String(data.get('keywords') ?? '').split(',').map(value => value.trim()).filter(Boolean),
+      pinned: pinned ? pinned.checked : state.editing.pinned,
+      body: String(data.get('body') ?? state.editing.body ?? ''),
+    };
+  }
+
+  let transferKey = null;
   function renderTransfer() {
     if (!el.transfer) return;
-    el.transfer.innerHTML = state.importing
-      ? ui.importHtml({ locale: state.locale, text: state.importText })
-      : '';
+    if (!state.importing) {
+      if (transferKey !== 'closed') {
+        transferKey = 'closed';
+        el.transfer.innerHTML = '';
+      }
+      return;
+    }
+    // Keep the textarea node while the user works in it: rebuilding on every
+    // unrelated render would drop focus and the caret. Rebuild only when the
+    // panel opens or the language changes.
+    const key = `open|${state.locale}`;
+    const existing = el.transfer.querySelector ? el.transfer.querySelector('textarea[name="import-text"]') : null;
+    if (key === transferKey && existing && String(existing.value ?? '') === state.importText) return;
+    transferKey = key;
+    el.transfer.innerHTML = ui.importHtml({ locale: state.locale, text: state.importText });
   }
 
   function render() {
+    // A pending delete whose card left the list must not linger: the flip
+    // would be invisible while every outside click paid for a re-render.
+    if (state.pendingDelete && !state.cards.some(card => card.id === state.pendingDelete)) {
+      state.pendingDelete = null;
+    }
     renderChrome();
     renderStats();
     renderTransfer();
     renderCards();
-    el.overlay.innerHTML = state.pendingDelete
-      ? ui.confirmHtml({ locale: state.locale })
-      : '';
-    el.overlay.hidden = !state.pendingDelete;
-    if (state.pendingDelete) {
-      const first = el.overlay.querySelector('button');
-      if (first) first.focus();
-    }
   }
 
   let toastTimer = 0;
@@ -226,7 +266,7 @@
     state.busy = true;
     try {
       const result = await call('memory.update', { id: card.id, patch });
-      state.editing = null;
+      if (state.editing && state.editing.id === card.id) state.editing = null;
       replaceCard(result.card);
       render();
       say(message);
@@ -274,6 +314,7 @@
   }
 
   async function confirmImport() {
+    if (state.busy) return;
     if (!state.importText.trim()) {
       say(label('importEmpty'), true);
       return;
@@ -294,14 +335,16 @@
   }
 
   async function removePending() {
-    const card = state.pendingDelete;
-    if (!card) return;
+    const id = state.pendingDelete;
+    if (!id) return;
+    const card = state.cards.find(candidate => candidate.id === id);
     state.pendingDelete = null;
+    if (!card) { render(); return; }
     state.busy = true;
     try {
       await call('memory.delete', { id: card.id });
       state.cards = state.cards.filter(candidate => candidate.id !== card.id);
-      state.editing = null;
+      if (state.editing && state.editing.id === card.id) state.editing = null;
       render();
       void refreshStatsOnly();
       say(label('deleted'));
@@ -329,7 +372,7 @@
 
     switch (action.dataset.act) {
       case 'edit':
-        void openEditor(card);
+        if (!state.busy) void openEditor(card);
         break;
       case 'toggle-pin':
         if (!state.busy) void applyPatch(card, { pinned: !card.pinned }, label('saved'));
@@ -343,9 +386,11 @@
         if (!state.busy) void copyCard(card);
         break;
       case 'delete':
-        state.pendingDelete = card;
-        state.editing = null;
+        state.pendingDelete = card.id;
         render();
+        break;
+      case 'delete-confirm':
+        if (!state.busy) void removePending();
         break;
       case 'cancel':
         state.editing = null;
@@ -374,11 +419,15 @@
     }, label('saved'));
   });
 
-  el.overlay.addEventListener('click', event => {
-    const action = event.target.closest('[data-act]');
-    if (!action) return;
-    if (action.dataset.act === 'confirm-delete') void removePending();
-    else { state.pendingDelete = null; render(); }
+  // A pending delete is cancelled by any click that is not the delete or the
+  // flipped confirm button itself: the confirmation lives on the button, not
+  // in a dialog, so "outside" is everywhere except those two.
+  document.addEventListener('click', event => {
+    if (!state.pendingDelete) return;
+    const action = event.target.closest ? event.target.closest('[data-act]') : null;
+    if (action && (action.dataset.act === 'delete' || action.dataset.act === 'delete-confirm')) return;
+    state.pendingDelete = null;
+    render();
   });
 
   el.stats.addEventListener('click', event => {
@@ -434,7 +483,7 @@
   el.refresh.addEventListener('click', () => void refresh());
 
   document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
+    if (event.key !== 'Escape' || event.isComposing) return;
     if (state.pendingDelete) { state.pendingDelete = null; render(); }
     else if (state.editing) { state.editing = null; render(); }
   });

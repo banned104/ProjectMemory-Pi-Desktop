@@ -161,7 +161,7 @@ test('formHtml offers the six kinds and both statuses', () => {
 });
 
 // ---------------------------------------------------------------------------
-// statsHtml / emptyHtml / confirmHtml
+// statsHtml / emptyHtml / delete flip
 // ---------------------------------------------------------------------------
 
 test('statsHtml renders counts and only offers review when something is pending', () => {
@@ -175,15 +175,27 @@ test('statsHtml renders counts and only offers review when something is pending'
   assertNoMarkup(html, 'statsHtml');
 });
 
-test('the empty and confirm dialogs are localized and escaped', () => {
+test('the empty state is localized and the delete flip stays escaped', () => {
   const empty = ui.emptyHtml('filtered', { locale: 'zh-CN' });
   assert.ok(empty.includes('没有匹配的条目'));
   assertNoMarkup(empty, 'emptyHtml');
 
-  const confirm = ui.confirmHtml({ locale: 'zh-CN' });
-  assert.ok(confirm.includes('删除这条记忆？'));
-  assert.ok(confirm.includes('aria-modal="true"'));
-  assertNoMarkup(confirm, 'confirmHtml');
+  // The confirmation lives on the button itself: the plain card offers
+  // "delete", the pending one offers "confirm delete?" instead.
+  const plain = ui.cardHtml(card(), { locale: 'zh-CN' });
+  assert.ok(plain.includes('data-act="delete"'));
+  assert.ok(!plain.includes('delete-confirm'));
+  const flipped = ui.cardHtml(card(), { locale: 'zh-CN', confirmingDelete: true });
+  assert.ok(flipped.includes('data-act="delete-confirm"'));
+  assert.ok(flipped.includes('确认删除？'));
+  assert.ok(!flipped.includes('data-act="delete"'));
+  assertNoMarkup(flipped, 'cardHtml confirm flip');
+
+  const rowPlain = ui.timelineHtml([card()], { locale: 'zh-CN' });
+  assert.ok(rowPlain.includes('data-act="delete"'));
+  const rowFlip = ui.timelineHtml([card()], { locale: 'zh-CN', confirmingDeleteId: 'LES-20260921-safe' });
+  assert.ok(rowFlip.includes('data-act="delete-confirm"'));
+  assertNoMarkup(rowFlip, 'timeline confirm flip');
 });
 
 // ---------------------------------------------------------------------------

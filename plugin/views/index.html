@@ -390,28 +390,6 @@
       }
       #toast.pm-toast-error { background: var(--pm-danger); color: #fff; }
 
-      #overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(12, 12, 16, 0.42);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-      }
-      #overlay[hidden] { display: none; }
-      .pm-dialog {
-        background: var(--pm-card);
-        color: var(--pm-fg);
-        border: 1px solid var(--pm-line);
-        border-radius: 12px;
-        padding: 16px;
-        max-width: 380px;
-        width: 100%;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
-      }
-      .pm-dialog h3 { margin: 0 0 6px; font-size: 14px; }
-      .pm-dialog p { margin: 0 0 12px; font-size: 12px; color: var(--pm-muted); }
     </style>
     <script src="./ui.js" defer></script>
     <script src="./app.js" defer></script>
@@ -449,6 +427,5 @@
     </div>
 
     <div id="toast" hidden></div>
-    <div id="overlay" hidden></div>
   </body>
 </html>

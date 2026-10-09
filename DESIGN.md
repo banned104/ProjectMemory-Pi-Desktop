@@ -251,6 +251,7 @@ test/               node --test 单元测试
 ### 已知取舍
 
 - `map` 条目按定义始终置顶，界面不给取消置顶的按钮：格式会把它顶回去，给了就是骗人。
+- 删除确认在按钮上原地翻转（再点确认、点外边或 Escape 取消），无浮层；时间线行与卡片一致。
 - 跨项目是独立复制：卡片复制按钮导出文件原文，导入框粘贴后进待确认批次；`id`/日期/链接不跨项目，无全局层、无同步。
 - 阅读热度是旁路账本 `.workflow/memory-inbox/.heat.json`（`{id: {hits, lastAccess}}`，读脏回空，上限 2000 条），`search`/`load`/`memory.get`/自动注入时 touch，失败不影响读；视图 `hot` 排序按 hits→lastAccess，时间线模式是纯 chronology 分组（无 pinned 置顶）。
 - 视图的搜索是子串匹配，与 Agent 的检索排序结果不一致，这是有意的。
