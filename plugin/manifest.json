@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "pi.project-memory",
   "name": "Project Memory",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "author": "pi.project-memory contributors",
   "license": "MIT",
   "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card. A docked work-panel view lists the project's entries as cards with search, filters, in-place editing, pinning, retiring and deletion.",
@@ -71,11 +71,15 @@
         "name": "search",
         "description": "Search this project's memory (.workflow/memory). Returns IDs, kinds, titles and one-line summaries; load an entry for its full text. Deprecated or superseded entries are excluded.",
         "risk": "low",
+        "planSafeActions": [
+          "search"
+        ],
         "schema": {
           "type": "object",
           "properties": {
             "query": {
-              "type": "string"
+              "type": "string",
+              "description": "1-3 focused concepts, e.g. \"teammate model config\""
             },
             "kind": {
               "type": "string",
@@ -86,12 +90,20 @@
                 "procedure",
                 "map",
                 "preference"
-              ]
+              ],
+              "description": "Restrict to one kind of memory entry"
             },
             "limit": {
               "type": "integer",
               "minimum": 1,
               "maximum": 20
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "search"
+              ],
+              "description": "Required in Plan/Goal; optional legacy default in Agent mode."
             }
           },
           "required": [
@@ -103,11 +115,21 @@
         "name": "load",
         "description": "Load the full text of one project memory entry by exact ID (from search results or an automatic <project-memory> block).",
         "risk": "low",
+        "planSafeActions": [
+          "load"
+        ],
         "schema": {
           "type": "object",
           "properties": {
             "id": {
               "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "load"
+              ],
+              "description": "Required in Plan/Goal; optional legacy default in Agent mode."
             }
           },
           "required": [
@@ -117,7 +139,7 @@
       },
       {
         "name": "propose",
-        "description": "Propose reusable project memory (a pitfall and its fix, a rule, a decision, a procedure, the project map, a preference) for the user to confirm. Returns arguments for the asktool card; call asktool with them unchanged. Writes nothing until the user answers the card.\n\n写卡片（propose 的 title/content/keywords）时遵守以下语言规则：\n不用\"不是……而是……\"、\"要……而不是……\"这类对比句式。没有需要对比的对象就不要对比，更不许在陈述之后追加一句\"不是其他的xxx\"。不许虚空打靶。\n只写干净的终态知识。不写过程残留：不写\"之前错了，因为……所以改成……\"；不写计划废话（\"我先做x再做y避免z\"）；不写分阶段措辞（\"第一版先……，观察后再……\"）；不写从稳妥到激进的方案阶梯；不罗列被排除的选项（\"还搜到了B、C、D，但是排除，因为……\"）；不写总结和总起（\"一句话总结\"、\"上述内容是……下面拆开\"）。\n用词用两个字及以上的完整形式（崩溃、终止、判定、推断、抛出、挂起、卡死；不许用崩、死、判、推、抛、挂、钉这类单字）。描述操作时用完整的动宾结构说明动作与对象（\"用新版本动态库替换「_vllm_fa3_C.abi3.so」共享库文件\"，不许说\"换库\"）。不许缩写（\"两个字的版本\"不许缩成\"两字版本\"）。不许用\"落地\"\"钉死\"\"对齐\"这类黑话，用任何行业外的人都能看懂的常用词。不许生造名词。\n代码里的 identifier 一律保持英文原名（变量名、类名、函数名等），严厉禁止翻译。适合用英文的专名就不要译成中文。\n禁字禁词：不许用\"栈\"（说\"使用的技术\"\"全部模型\"）；不许用\"落\"（落下、落盘）；不许用\"死\"（定死、打死）；不许用\"拆\"（要表达拆解就用\"理解\"）；不许用\"契约\"；不许用\"偏\"（偏弱、偏大）；\"粗、细、硬、软、实、虚\"不许单独出现，只许出现在\"详细\"\"实际\"这类本来就是常用词的词语里，不许取其字面意思。\n只写真正可复用、有把握的知识；没有就不写，不许为了凑数而写，不许迎合。",
+        "description": "After prepare supplies candidate bodies, submit reviewToken and one evidence-based decision per item. Returns a version-bound comparison card only for analysed changes; recent rejected/duplicate outcomes are suppressed and matching pending proposals are reused without another card. Use reReview only after the user explicitly asks to reconsider. Cards allow the analysed write, duplicate, defer or reject; edited substance/alternative writes require new comparison in the review panel. Legacy items calls only prepare. Agent-only; no formal memory write until genuine user confirmation.\n\n写卡片（propose 的 title/content/keywords）时遵守以下语言规则：\n不用\"不是……而是……\"、\"要……而不是……\"这类对比句式。没有需要对比的对象就不要对比，更不许在陈述之后追加一句\"不是其他的xxx\"。不许虚空打靶。\n只写干净的终态知识。不写过程残留：不写\"之前错了，因为……所以改成……\"；不写计划废话（\"我先做x再做y避免z\"）；不写分阶段措辞（\"第一版先……，观察后再……\"）；不写从稳妥到激进的方案阶梯；不罗列被排除的选项（\"还搜到了B、C、D，但是排除，因为……\"）；不写总结和总起（\"一句话总结\"、\"上述内容是……下面拆开\"）。\n用词用两个字及以上的完整形式（崩溃、终止、判定、推断、抛出、挂起、卡死；不许用崩、死、判、推、抛、挂、钉这类单字）。描述操作时用完整的动宾结构说明动作与对象（\"用新版本动态库替换「_vllm_fa3_C.abi3.so」共享库文件\"，不许说\"换库\"）。不许缩写（\"两个字的版本\"不许缩成\"两字版本\"）。不许用\"落地\"\"钉死\"\"对齐\"这类黑话，用任何行业外的人都能看懂的常用词。不许生造名词。\n代码里的 identifier 一律保持英文原名（变量名、类名、函数名等），严厉禁止翻译。适合用英文的专名就不要译成中文。\n禁字禁词：不许用\"栈\"（说\"使用的技术\"\"全部模型\"）；不许用\"落\"（落下、落盘）；不许用\"死\"（定死、打死）；不许用\"拆\"（要表达拆解就用\"理解\"）；不许用\"契约\"；不许用\"偏\"（偏弱、偏大）；\"粗、细、硬、软、实、虚\"不许单独出现，只许出现在\"详细\"\"实际\"这类本来就是常用词的词语里，不许取其字面意思。\n只写真正可复用、有把握的知识；没有就不写，不许为了凑数而写，不许迎合。",
         "risk": "low",
         "schema": {
           "type": "object",
@@ -138,22 +160,37 @@
                       "procedure",
                       "map",
                       "preference"
-                    ]
+                    ],
+                    "description": "lesson: pitfall or root cause. rule: an agreed constraint. decision: why X over Y, and when to revisit. procedure: steps of a repeatable task. map: module layout, entry points, key paths (one per project). preference: a working preference for this project."
                   },
                   "title": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Specific, searchable title (<= 120 chars)"
                   },
                   "content": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Self-contained: the symptom, cause, fix or rule, and the files involved"
                   },
                   "keywords": {
                     "type": "array",
                     "items": {
                       "type": "string"
-                    }
+                    },
+                    "description": "Terms a future question would use, including synonyms"
                   },
                   "pin": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Inject this entry on every message instead of only when it matches. Use sparingly; pinned entries share a small budget."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "maxLength": 1600,
+                    "description": "Optional source description; not a file path authority."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "maxLength": 1600,
+                    "description": "Optional applicability for the reusable knowledge."
                   }
                 },
                 "required": [
@@ -163,10 +200,241 @@
                   "keywords"
                 ]
               }
+            },
+            "reviewToken": {
+              "type": "string"
+            },
+            "decisions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "create",
+                      "replace",
+                      "conflict",
+                      "duplicate",
+                      "skip"
+                    ]
+                  },
+                  "targetId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "same": {
+                    "type": "string"
+                  },
+                  "changes": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "index",
+                  "action",
+                  "reason"
+                ]
+              }
+            },
+            "reReview": {
+              "type": "boolean",
+              "description": "Only for an explicit user request to revisit a recent rejection/duplicate. Does not bypass comparison or user approval."
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "items"
+              ]
+            },
+            {
+              "required": [
+                "reviewToken",
+                "decisions"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "prepare",
+        "description": "Prepare memory comparison: automatically supplies versioned candidate bodies within budget; page incomplete bodies before proposing. pending lists unanalysed imports. Read-only in Agent/Plan/Goal, no disk writes. Returns an in-memory session reviewToken.",
+        "risk": "low",
+        "planSafeActions": [
+          "prepare",
+          "page",
+          "pending"
+        ],
+        "schema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "prepare",
+                "page",
+                "pending"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "lesson",
+                      "rule",
+                      "decision",
+                      "procedure",
+                      "map",
+                      "preference"
+                    ],
+                    "description": "lesson: pitfall or root cause. rule: an agreed constraint. decision: why X over Y, and when to revisit. procedure: steps of a repeatable task. map: module layout, entry points, key paths (one per project). preference: a working preference for this project."
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Specific, searchable title (<= 120 chars)"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Self-contained: the symptom, cause, fix or rule, and the files involved"
+                  },
+                  "keywords": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Terms a future question would use, including synonyms"
+                  },
+                  "pin": {
+                    "type": "boolean",
+                    "description": "Inject this entry on every message instead of only when it matches. Use sparingly; pinned entries share a small budget."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "maxLength": 1600,
+                    "description": "Optional source description; not a file path authority."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "maxLength": 1600,
+                    "description": "Optional applicability for the reusable knowledge."
+                  }
+                },
+                "required": [
+                  "kind",
+                  "title",
+                  "content",
+                  "keywords"
+                ]
+              }
+            },
+            "importBatchId": {
+              "type": "string"
+            },
+            "reviewToken": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
             }
           },
           "required": [
-            "items"
+            "action"
+          ]
+        }
+      },
+      {
+        "name": "task",
+        "description": "Project task memory check: begin defines an explicit new goal, checkpoint checks a phase, finish records new/covered/none/awaiting and a short reason; status only reads diagnostics. Temporary state and delivery versions are not approved knowledge. begin/checkpoint/finish are Agent-only. State is applied from the genuine tool result; no formal memory write. Unchecked finish notifications cannot force another model run.",
+        "risk": "low",
+        "planSafeActions": [
+          "status"
+        ],
+        "schema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "begin",
+                "checkpoint",
+                "finish",
+                "status"
+              ]
+            },
+            "goal": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "phase": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "new",
+                "covered",
+                "none",
+                "awaiting"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "usedIds": {
+              "type": "array",
+              "maxItems": 24,
+              "items": {
+                "type": "string"
+              }
+            },
+            "pending": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }
@@ -213,13 +481,13 @@
     "en": {
       "name": "Project Memory",
       "description": "A per-project memory built from plain Markdown files. Relevant entries are attached to each message automatically, and new entries are saved only after you confirm them on an in-chat card. A docked work-panel view lists the project's entries as cards with search, filters, in-place editing, pinning, retiring and deletion.",
-      "safetyNotes": "Reads .workflow/memory in the open project. Writes only after you answer the in-chat confirmation card (or press Save in the review panel): new files in .workflow/memory, and the status/related/supersededBy fields of an old entry you chose to replace or link. Pending proposals are kept in .workflow/memory-inbox (git-ignored); the card path deletes them once handled, the panel marks them done. The docked work-panel view can edit an entry's title, kind, keywords, pinned flag, status and body, and can delete an entry file, all under .workflow/memory. Deletion happens only in the plugin process and only from that view's confirm button: the page sends an entry id, never a path, and the id is resolved to the file the process just loaded and re-checked against .workflow/memory before anything is unlinked. The agent extension cannot delete a memory entry -- its remove is confined to .workflow/memory-inbox, where handled batches live. Includes an agent extension that runs inside the agent process, where the host's file-permission gateway does not apply; it adds retrieved entry titles to your messages and performs the confirmed writes, confined to those two directories by its own file layer. Symbolic links anywhere under the memory directories, hard links, special files and files over 256 KB are refused, as is a project root that is replaced after the session starts. Retrieved entries are presented to the model as project data, not instructions. The view escapes everything it renders from repository files and never builds a link or an image from them. The plugin makes no network requests and runs no commands. To pause automatic retrieval for a project, create an empty file at .workflow/memory/DISABLED."
+      "safetyNotes": "Project memory is local Markdown. Agent search/load and proposal staging use the host session-root file gateway. Confirmed chat writes and panel operations use the plugin's own confined Node file layer because the host gateway has no atomic lock primitive; these operations are outside the host's per-call file permission audit. Both processes pin the project root, refuse links/special files, and share project writer tickets under .workflow/memory-inbox/.writers. Only tickets of confirmed exited processes are removed; a live or unverifiable owner is never displaced by age. Waiting times out after 10 seconds and can be cancelled. The chat path binds the real propose result and actual asktool request to the full proposal digest; the panel uses process-memory review tokens bound to the project and digest. Proposal/target changes require a fresh review. Old batches are upgraded only when displayed again; old or restart-lost approvals cannot write. Entries carry full batchId, itemId and commitKey for stable retries, including safe backlink recovery. The view can edit and delete memory files after its controls are used, checking supplied file versions; deletion is permanent. The agent extension may remove handled inbox files and its writer tickets, not memory entries. Reads are bounded to regular single-link files (256 KB per file, 2000 files and 16 MB per corpus). No network requests or commands are executed. This protects the plugin's own coordinated paths, not arbitrary external editors, shell commands, other plugins or a malicious local process. To pause automatic retrieval create .workflow/memory/DISABLED. Comparison preparation automatically supplies candidate bodies (24,000 UTF-16 units total, 8,000 per page) with session-bound, expiring receipts and no disk writes. Agent evidence-based decisions are required before staging a card. Imports and restart-lost analysis remain unanalysed until the current agent compares them; no background model is started. All compared versions are checked again before a confirmed write. Plan/Goal search/load/prepare require declared read-only actions and omit heat writes; propose is Agent-only. Text delivery is verifiable, model understanding and evidence truth are not. Approval cards include bounded old/new excerpts and comparison evidence; the panel provides complete originals and a bounded line diff, with a complete parallel-text fallback. Unselected items remain unreviewed; explicit defer is resumable, reject/duplicate write nothing. Revised content, optional origin/scope or alternative write actions invalidate old analysis/approval and require current-agent comparison. An advisory project decision ledger (.workflow/memory-inbox/.decisions.json) stores SHA256 fingerprints, actor, short reasons and timestamps for up to 30 days/1000 records/240000 bytes; corrupt/unavailable history raises a warning but never authorizes or blocks a confirmed memory write. New evidence/versions or explicit user reReview bypass rejection dedup; matching pending proposals return their existing identity without another card. User decisions and agent duplicate conclusions are labelled separately. Decision updates use the existing project writer tickets; proposal staging retains the session-root gateway and local proposal serialization. Task lifecycle uses .workflow/memory-inbox/.tasks.json for short goals, checkpoints, pending identities and delivered-version indexes, never complete conversations or sensitive tool output. Retention is 30 days, at most 100 tasks and 240000 UTF-8 bytes. Explicit task begin/checkpoint/finish are Agent-only; status and explicit Plan/Goal search/load/prepare, including result tracking, remain zero-write. The extension context exposes no mode: automatic lifecycle events are separately authorized to write this temporary ledger even when Agent/Plan/Goal cannot be distinguished; this never authorizes formal memory writes. Updates share writer tickets with a two-second task-state wait and visible in-memory fallback. Before each provider request the plugin supplies current approved bodies even with zero memory-tool calls: at most 8000 new UTF-16 characters per request (two cached blocks of at most 4000), at most three bodies per block and 2000 characters per body, with source/hash/coverage/truncation. Stable task/phase/recovery keys preserve repeated-request bytes; stages can refresh current versions. DISABLED pauses body retrieval, not temporary task bookkeeping. Explicit begin is authoritative; inferred continuation boundaries are heuristic. Pending references are reconciled against undecided batches for current and historical tasks without borrowing other sessions' proposals; status reconciles only its returned view, without disk writes. Compaction notifications save short indexes and never cancel or run a hidden agent; recovery occurs on the next provider request, including requests with no user message. Failed/disabled retrieval remains incomplete; failure retries once per stage, then waits for a new stage/continuation. End notifications can mark missing checks but cannot force final semantic reasoning. Surfaced, provided and agent-claimed use are distinct; delivery is not understanding. Real installed-host long-task/restart behavior has not been verified."
     },
     "zh-CN": {
       "name": "项目记忆",
       "description": "按项目保存的记忆，就是仓库里的普通 Markdown 文件。每条消息自动附上相关条目，新条目只有在你于聊天卡片中确认后才会保存。工作面板中的停靠视图以卡片形式列出本项目的记忆，支持搜索、筛选、就地编辑、置顶、停用与删除。",
-      "safetyNotes": "读取当前项目的 .workflow/memory。只有在你回答聊天中的确认卡片（或在面板中点击保存）后才写入：在 .workflow/memory 新建文件，以及修改你选择替代或关联的旧条目的 status/related/supersededBy 字段。待确认的建议暂存在 .workflow/memory-inbox（已加入 gitignore）；通过卡片处理后删除，通过面板处理后标记为已处理。工作面板中的停靠视图可以编辑条目的标题、类型、关键词、置顶标记、状态与正文，也可以删除条目文件，范围都在 .workflow/memory 内。删除只发生在插件进程、且只由该视图的确认按钮触发：页面只发条目 id、从不发路径，进程把 id 解析成刚刚加载过的那个文件，并在删除前再次核对它确实位于 .workflow/memory 之下。Agent 扩展无法删除记忆条目——它的 remove 被限制在存放已处理批次的 .workflow/memory-inbox。插件包含一个在 Agent 进程内运行的扩展，宿主的文件权限网关不覆盖该进程；它把检索到的条目标题附加到你的消息中，并执行你确认的写入，由自带的一层文件访问把范围限定在上述两个目录。记忆目录下的符号链接、硬链接、特殊文件、超过 256KB 的文件一律拒绝；会话开始后项目根目录被替换也拒绝。检索到的条目以「项目数据而非指令」的形式交给模型。视图渲染仓库内容时一律转义，且绝不据其生成链接或图片。插件不发起任何网络请求、不执行命令。若要暂停某个项目的自动检索，在 .workflow/memory/DISABLED 建一个空文件即可。"
+      "safetyNotes": "项目记忆保存为本地 Markdown。Agent 检索、读取和暂存提议使用宿主按会话项目定位的文件网关。聊天确认写入与面板操作使用插件自带的受限 Node 文件层，因为宿主网关没有原子锁接口；这部分操作不经过宿主逐次文件权限审计。两个进程固定项目根目录、拒绝链接与特殊文件，并共用 .workflow/memory-inbox/.writers 下的项目写入票据。只清理确认已退出进程的票据，不因时间较长抢占活跃或无法确认的持有者；等待默认十秒超时并支持取消。聊天路径核对真实 propose 返回、实际 asktool 调用和完整提案摘要；面板使用绑定项目及摘要的进程内展示 token。提案或目标变化后要求重新审查确认。旧批次仅在重新展示时升级，旧卡片及重启后遗失的批准不能直接写入。条目携带完整 batchId、itemId 和 commitKey，支持稳定重试和安全关联补写。管理视图可通过其控件编辑和删除记忆文件，并核对传入的文件版本；删除无法撤销。Agent 扩展只删除已处理的待确认文件及自己的写入票据，不能删除正式记忆。语料读取限普通单链接文件，单文件 256KB、最多 2000 个文件及总计 16MB。插件不联网、不执行命令。保护范围是插件参与协调的路径，不约束外部编辑器、shell、其他插件或恶意本机进程。暂停自动检索可创建 .workflow/memory/DISABLED。 比较准备自动提供候选正文（单次 24,000、每页 8,000 UTF-16 字符），使用绑定会话且过期的内存凭据，不写磁盘。当前 Agent 须提交有依据的建议才暂存卡片。导入及重启后遗失分析信任的批次需重新比较，不启动后台模型。正式提交再次检查所有比较版本。Plan/Goal 的 search/load/prepare 使用显式只读动作并跳过热度写入，propose 仅 Agent 模式。可验证正文提供与版本，不能验证模型理解或依据真实性。 审批卡片显示有限旧新片段及比较依据，面板提供完整原文和有计算上限的行级差异，超限时完整并列展示。未选择项保持未审，明确暂缓仍可继续，拒绝或重复不写正式记忆。正文、可选 origin/scope 或替代写入动作修改会使旧分析及批准失效，须由当前 Agent 重新比较。项目旁路决定账本 .workflow/memory-inbox/.decisions.json 保存 SHA256 指纹、决定来源、短理由和时间，最多保留三十天、一千条及 240000 字节；损坏或不可读会提示，不能授权写入，也不阻止已确认的记忆保存。新依据或版本变化、用户明确 reReview 可重新提出；相同待审建议返回已有身份并避免第二张卡。用户决定与 Agent 重复结论分开标记。决定更新使用现有项目写入票据；提案暂存仍使用会话文件网关和进程内提案队列。任务生命周期使用 .workflow/memory-inbox/.tasks.json 保存短目标、阶段结论、待审身份和已提供版本索引，不保存完整对话或敏感工具输出；保留三十天，最多一百项及 240000 UTF-8 字节。显式 task begin/checkpoint/finish 仅 Agent 模式；status 及 Plan/Goal 的显式 search/load/prepare，包括结果追踪，仍为零写入。扩展上下文不提供模式字段：用户另行授权自动生命周期事件在无法区分 Agent/Plan/Goal 时写入此临时账本，这不授权正式记忆写入。更新共用项目票据，任务状态等待两秒，失败提示并保留内存回退。请求前即使没有记忆工具调用也提供当前正式正文：每请求新增最多 8000 UTF-16 字符（最多两个各 4000 字符的缓存块），每块最多三条正文，每条最多 2000，附来源/hash/覆盖和截断说明。任务/阶段/恢复键保持重复请求字节稳定，阶段变化可刷新版本。DISABLED 暂停正文检索，临时任务记录仍可更新。显式 begin 确定新任务，自动推断的续接边界属于启发式。当前及历史任务的待审引用按真实未决定批次核对，不借用其他会话的提案；status 只核对返回视图，不写磁盘。压缩通知保存短索引，不取消压缩、不启动隐藏 Agent；下一次请求恢复，包括没有用户消息的请求。检索失败或停用仍标为未完成恢复，失败每阶段重试一次，随后等待新阶段或续接消息。结束通知可标记漏查，不能强制最终语义检查。摘要出现、正文已提供、Agent 声称使用分开记录；提供不证明理解。真实安装态长任务及重启仍未验证。"
     }
   },
-  "safetyNotes": "Reads .workflow/memory in the open project. Writes only after you answer the in-chat confirmation card (or press Save in the review panel): new files in .workflow/memory, and the status/related/supersededBy fields of an old entry you chose to replace or link. Pending proposals are kept in .workflow/memory-inbox (git-ignored); the card path deletes them once handled, the panel marks them done. The docked work-panel view can edit an entry's title, kind, keywords, pinned flag, status and body, and can delete an entry file, all under .workflow/memory. Deletion happens only in the plugin process and only from that view's confirm button: the page sends an entry id, never a path, and the id is resolved to the file the process just loaded and re-checked against .workflow/memory before anything is unlinked. The agent extension cannot delete a memory entry -- its remove is confined to .workflow/memory-inbox, where handled batches live. Includes an agent extension that runs inside the agent process, where the host's file-permission gateway does not apply; it adds retrieved entry titles to your messages and performs the confirmed writes, confined to those two directories by its own file layer. Symbolic links anywhere under the memory directories, hard links, special files and files over 256 KB are refused, as is a project root that is replaced after the session starts. Retrieved entries are presented to the model as project data, not instructions. The view escapes everything it renders from repository files and never builds a link or an image from them. The plugin makes no network requests and runs no commands. To pause automatic retrieval for a project, create an empty file at .workflow/memory/DISABLED."
+  "safetyNotes": "Project memory is local Markdown. Agent search/load and proposal staging use the host session-root file gateway. Confirmed chat writes and panel operations use the plugin's own confined Node file layer because the host gateway has no atomic lock primitive; these operations are outside the host's per-call file permission audit. Both processes pin the project root, refuse links/special files, and share project writer tickets under .workflow/memory-inbox/.writers. Only tickets of confirmed exited processes are removed; a live or unverifiable owner is never displaced by age. Waiting times out after 10 seconds and can be cancelled. The chat path binds the real propose result and actual asktool request to the full proposal digest; the panel uses process-memory review tokens bound to the project and digest. Proposal/target changes require a fresh review. Old batches are upgraded only when displayed again; old or restart-lost approvals cannot write. Entries carry full batchId, itemId and commitKey for stable retries, including safe backlink recovery. The view can edit and delete memory files after its controls are used, checking supplied file versions; deletion is permanent. The agent extension may remove handled inbox files and its writer tickets, not memory entries. Reads are bounded to regular single-link files (256 KB per file, 2000 files and 16 MB per corpus). No network requests or commands are executed. This protects the plugin's own coordinated paths, not arbitrary external editors, shell commands, other plugins or a malicious local process. To pause automatic retrieval create .workflow/memory/DISABLED. Comparison preparation automatically supplies candidate bodies (24,000 UTF-16 units total, 8,000 per page) with session-bound, expiring receipts and no disk writes. Agent evidence-based decisions are required before staging a card. Imports and restart-lost analysis remain unanalysed until the current agent compares them; no background model is started. All compared versions are checked again before a confirmed write. Plan/Goal search/load/prepare require declared read-only actions and omit heat writes; propose is Agent-only. Text delivery is verifiable, model understanding and evidence truth are not. Approval cards include bounded old/new excerpts and comparison evidence; the panel provides complete originals and a bounded line diff, with a complete parallel-text fallback. Unselected items remain unreviewed; explicit defer is resumable, reject/duplicate write nothing. Revised content, optional origin/scope or alternative write actions invalidate old analysis/approval and require current-agent comparison. An advisory project decision ledger (.workflow/memory-inbox/.decisions.json) stores SHA256 fingerprints, actor, short reasons and timestamps for up to 30 days/1000 records/240000 bytes; corrupt/unavailable history raises a warning but never authorizes or blocks a confirmed memory write. New evidence/versions or explicit user reReview bypass rejection dedup; matching pending proposals return their existing identity without another card. User decisions and agent duplicate conclusions are labelled separately. Decision updates use the existing project writer tickets; proposal staging retains the session-root gateway and local proposal serialization. Task lifecycle uses .workflow/memory-inbox/.tasks.json for short goals, checkpoints, pending identities and delivered-version indexes, never complete conversations or sensitive tool output. Retention is 30 days, at most 100 tasks and 240000 UTF-8 bytes. Explicit task begin/checkpoint/finish are Agent-only; status and explicit Plan/Goal search/load/prepare, including result tracking, remain zero-write. The extension context exposes no mode: automatic lifecycle events are separately authorized to write this temporary ledger even when Agent/Plan/Goal cannot be distinguished; this never authorizes formal memory writes. Updates share writer tickets with a two-second task-state wait and visible in-memory fallback. Before each provider request the plugin supplies current approved bodies even with zero memory-tool calls: at most 8000 new UTF-16 characters per request (two cached blocks of at most 4000), at most three bodies per block and 2000 characters per body, with source/hash/coverage/truncation. Stable task/phase/recovery keys preserve repeated-request bytes; stages can refresh current versions. DISABLED pauses body retrieval, not temporary task bookkeeping. Explicit begin is authoritative; inferred continuation boundaries are heuristic. Pending references are reconciled against undecided batches for current and historical tasks without borrowing other sessions' proposals; status reconciles only its returned view, without disk writes. Compaction notifications save short indexes and never cancel or run a hidden agent; recovery occurs on the next provider request, including requests with no user message. Failed/disabled retrieval remains incomplete; failure retries once per stage, then waits for a new stage/continuation. End notifications can mark missing checks but cannot force final semantic reasoning. Surfaced, provided and agent-claimed use are distinct; delivery is not understanding. Real installed-host long-task/restart behavior has not been verified."
 }

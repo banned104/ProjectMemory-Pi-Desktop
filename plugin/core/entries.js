@@ -116,6 +116,13 @@ function parseEntry(source, raw) {
     summary: clip(summary, 160),
     body: text,
     source,
+    origin:typeof data.origin==='string'?clip(data.origin,1600):'',
+    scope:typeof data.scope==='string'?clip(data.scope,1600):'',
+    supersedes:typeof data.supersedes==='string'?data.supersedes:null,
+    hash: sha(raw),
+    batchId: typeof data.batchId === 'string' ? data.batchId : null,
+    itemId: typeof data.itemId === 'string' ? data.itemId : null,
+    commitKey: typeof data.commitKey === 'string' ? data.commitKey : null,
     created: typeof data.created === 'string' ? data.created : '',
     updated: typeof data.updated === 'string' ? data.updated : '',
     related: asList(data.related),
@@ -145,6 +152,7 @@ function parseImportItem(text) {
     content: entry.body,
     keywords: entry.keywords,
     pin: entry.pinned === true,
+    ...(entry.origin?{origin:entry.origin}:{}),...(entry.scope?{scope:entry.scope}:{}),
   };
 }
 
@@ -168,7 +176,7 @@ function parseImportItem(text) {
   * Walk both memory directories and parse every `.md` file. Ordering is by
   * code unit so the first-wins rule for duplicate ids is reproducible.
   */
- async function loadCorpus(reader) {
+ async function loadCorpus(reader, { keepDuplicates = false } = {}) {
    const files = [];
    let queued = 0;
    const walk = async dir => {
@@ -196,14 +204,14 @@ function parseImportItem(text) {
     try { raw = await reader.read(source); }
     catch (error) { if (isMissing(error)) continue; throw error; }
     const entry = parseEntry(source, raw);
-    if (seen.has(entry.id)) continue;
+    if (!keepDuplicates && seen.has(entry.id)) continue;
     seen.add(entry.id);
     entries.push(entry);
   }
   return entries;
 }
 
-function renderEntry({ id, kind, title, keywords, content, created, updated, pinned, batchRef, supersedes, related }) {
+function renderEntry({ id, kind, title, keywords, content, created, updated, pinned, batchRef, batchId, itemId, commitKey, supersedes, related, origin, scope }) {
   const lines = [
     '---',
     `id: ${yamlString(id)}`,
@@ -216,8 +224,13 @@ function renderEntry({ id, kind, title, keywords, content, created, updated, pin
     // drops a never-edited entry, and no read-time fallback is needed downstream.
     `updated: ${updated ?? created}`,
   ];
+  if(origin)lines.push(`origin: ${yamlString(origin)}`);
+  if(scope)lines.push(`scope: ${yamlString(scope)}`);
   if (pinned) lines.push('pinned: true');
   if (batchRef) lines.push(`batchRef: ${batchRef}`);
+  if (batchId) lines.push(`batchId: ${yamlString(batchId)}`);
+  if (itemId) lines.push(`itemId: ${yamlString(itemId)}`);
+  if (commitKey) lines.push(`commitKey: ${yamlString(commitKey)}`);
   if (supersedes) lines.push(`supersedes: ${yamlString(supersedes)}`);
   if (related?.length) lines.push(`related: ${yamlList(related)}`);
   lines.push('---', '', String(content ?? '').trim(), '');

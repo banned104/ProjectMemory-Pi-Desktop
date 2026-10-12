@@ -22,7 +22,7 @@ const batch = require('./batch.js');
  const { MAX_TITLE, MAX_CONTENT, MAX_KEYWORDS } = batch;
 
 /** Fields the view may change. `id`, `created`, `batchRef` and the link fields are not among them. */
-const EDITABLE = ['title', 'kind', 'keywords', 'pinned', 'status', 'body'];
+const EDITABLE = ['title', 'kind', 'keywords', 'pinned', 'status', 'body', 'origin', 'scope'];
 /** `archived` / `retired` exist in the format; the view offers one honest switch. */
 const STATUSES = ['active', 'retired'];
 const MAX_BODY = entries.MAX_LOAD_CHARS;
@@ -52,6 +52,8 @@ function cardOf(entry) {
     pinnedForced: entry.kind === 'map',
     supersededBy: entry.supersededBy ? sanitize(entry.supersededBy, 60) : null,
     related: entry.related.map(value => sanitize(value, 60)),
+    supersedes:entry.supersedes?sanitize(entry.supersedes,80):null,
+    origin:sanitize(entry.origin??'',1600),scope:sanitize(entry.scope??'',1600),
     batchRef: entry.batchRef ? sanitize(entry.batchRef, 60) : null,
     created: entry.created,
     // Lazy migration: entries written before 'updated' existed read as
@@ -195,6 +197,10 @@ function validatePatch(patch) {
     out.body = body;
   }
 
+  for(const field of ['origin','scope'])if(Object.hasOwn(input,field)){
+    if(typeof input[field]!=='string'||input[field].length>1600)throw fail('badMetadata',field+' exceeds 1600 characters');
+    out[field]=input[field].trim();
+  }
   const unknown = Object.keys(input).filter(key => !EDITABLE.includes(key));
   if (unknown.length) throw fail('notEditable', `not editable: ${unknown.join(', ')}`);
   if (!Object.keys(out).length) throw fail('nothingToChange', 'no editable field was supplied');
@@ -213,6 +219,8 @@ function fieldsOf(patch, date) {
   if (patch.keywords !== undefined) fields.keywords = patch.keywords;
   if (patch.pinned !== undefined) fields.pinned = patch.pinned;
   if (patch.status !== undefined) fields.status = patch.status;
+  if(patch.origin!==undefined)fields.origin=patch.origin;
+  if(patch.scope!==undefined)fields.scope=patch.scope;
   return fields;
 }
 

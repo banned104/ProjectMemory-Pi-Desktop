@@ -67,6 +67,10 @@ function memoryIo(initial = {}, options = {}) {
       }
       files.set(source, String(content));
     },
+    createExclusive: async (source, content) => {
+      if (files.has(source)) throw Object.assign(new Error('already exists'), { code: 'EEXIST' });
+      files.set(source, String(content));
+    },
     exists: async source => files.has(source) || isDir(source),
     remove: async source => { files.delete(source); },
   };
@@ -109,4 +113,19 @@ function mdFile(id, { kind = 'lesson', title = 'Sample entry', body = 'Body text
   ].filter(line => line !== '').join('\n');
 }
 
-module.exports = { memoryIo, makeEntry, mdFile, MEMORY, INBOX };
+/** A fresh test approval for legacy behavior tests; stale-approval tests keep their own frozen digest. */
+const confirmedCommit = (io, batch, selections, options = {}) => {
+  const core = require('../plugin/core/index.js');
+  return core.commitBatch(io, batch, selections, { expectedDigest: core.proposalDigest(batch), ...options });
+};
+async function answeredCall(event, ctx, deps) {
+  const extension = require('../plugin/extension.js');
+  const call = { ...event, toolCallId: event.toolCallId ?? 'test-call', input: { questions: event.details?.questions } };
+  if (call.toolName === 'asktool' && !call.isError) {
+    const core = require('../plugin/core/index.js');
+    for (const batch of await core.listBatches(deps.io)) await extension._internals.onToolResult({ toolName: 'plugin_pi_project_memory_propose', details: { status: 'awaiting-user-answer', batchId: batch.id, proposalDigest: core.proposalDigest(batch) } }, ctx, deps);
+    await extension._internals.onToolCall(call, ctx, deps);
+  }
+  return extension._internals.onToolResult(call, ctx, deps);
+}
+module.exports = { memoryIo, makeEntry, mdFile, MEMORY, INBOX, confirmedCommit, answeredCall };

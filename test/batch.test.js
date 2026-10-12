@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const core = require('../plugin/core/index.js');
+const { confirmedCommit } = require('./helpers.js');
 const { memoryIo, makeEntry, mdFile, MEMORY, INBOX } = require('./helpers.js');
 
 const BATCH_ID = 'KB-11111111-2222-3333-4444-555555555555';
@@ -84,9 +85,9 @@ test('the recommended option comes first and skip is always offered', () => {
   const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [existing] }]);
   const item = batch.items[0];
 
-  assert.equal(item.decision.action, 'replace');
-  assert.equal(item.decision.targetId, 'LSN-20260101-old');
-  assert.equal(item.ask[0].key, 'replace:LSN-20260101-old');
+  assert.equal(item.decision.action, 'create');
+  assert.equal(item.decision.targetId, null);
+  assert.equal(item.ask[0].key, 'create');
   assert.match(item.ask[0].label, /^Recommended · /);
   assert.equal(item.ask.at(-1).key, core.SKIP_KEY);
   assert.deepEqual(
@@ -117,11 +118,9 @@ test('a map that shares no term with the proposal is still the update target', (
   assert.deepEqual(batch.items[0].ask.map(choice => choice.key), ['replace:MAP', core.SKIP_KEY]);
 });
 
-test('a retired map does not take the create action away', () => {
+test('a retired map is reported instead of offering an overwrite', () => {
   const retired = makeEntry({ id: 'MAP', kind: 'map', title: 'Project map', status: 'retired' });
-  const batch = propose([retired], [{ kind: 'map', title: 'Project map' }]);
-  assert.equal(batch.items[0].decision.action, 'create');
-  assert.deepEqual(batch.items[0].ask.map(choice => choice.key), ['create', core.SKIP_KEY]);
+  assert.throws(() => propose([retired], [{ kind: 'map', title: 'Project map' }]), /invalid project map layout/);
 });
 
 test('every kind always offers a way to save, and the card leads with the recommendation', () => {
@@ -232,7 +231,7 @@ test('an unmatched answer names the labels the card offered', () => {
 test('create writes one entry carrying the batch reference', async () => {
   const io = memoryIo({});
   const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'create' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'create' }]);
 
   assert.equal(result.saved.length, 1);
   assert.equal(result.skipped, 0);
@@ -253,7 +252,7 @@ test('replace deprecates the old entry and points it at the new one', async () =
     similar: [core.parseEntry(source, io.files.get(source))],
   }]);
 
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'replace:LSN-20260101-old' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'replace:LSN-20260101-old' }]);
   const newId = result.saved[0].id;
   assert.notEqual(newId, 'LSN-20260101-old');
 
@@ -273,7 +272,7 @@ test('conflict links both entries and leaves both active', async () => {
     similar: [core.parseEntry(source, io.files.get(source))],
   }]);
 
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'conflict:LSN-20260101-old' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'conflict:LSN-20260101-old' }]);
   const newId = result.saved[0].id;
 
   const old = core.parseEntry(source, io.files.get(source));
@@ -291,7 +290,7 @@ test('a duplicate selection writes nothing', async () => {
     similar: [core.parseEntry(source, io.files.get(source))],
   }]);
 
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'duplicate:LSN-20260101-old' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'duplicate:LSN-20260101-old' }]);
   assert.deepEqual(result.saved, []);
   assert.equal(result.skipped, 1);
   assert.deepEqual([...io.files.keys()], [source]);
@@ -305,7 +304,7 @@ test('updating the map overwrites it in place and never deprecates it', async ()
     similar: [core.parseEntry(source, io.files.get(source))],
   }]);
 
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'replace:MAP' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'replace:MAP' }]);
   assert.deepEqual(result.saved.map(s => s.id), ['MAP']);
   assert.deepEqual([...io.files.keys()], [source], 'the map stays a single file');
 
@@ -319,7 +318,7 @@ test('updating the map overwrites it in place and never deprecates it', async ()
 test('a project with no map creates one, as MAP.md', async () => {
   const io = memoryIo({});
   const batch = propose([], [{ kind: 'map', title: 'Project map', content: 'layout: src/boot' }]);
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'create' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'create' }]);
 
   assert.deepEqual(result.saved.map(entry => entry.id), ['MAP']);
   assert.deepEqual([...io.files.keys()], [`${MEMORY}/MAP.md`]);
@@ -339,7 +338,7 @@ test('commit refuses to replace across kinds', async () => {
   });
 
   await assert.rejects(
-    () => core.commitBatch(io, batch, [{ index: 0, key: 'replace:RUL-20260101-old' }]),
+    () => confirmedCommit(io, batch, [{ index: 0, key: 'replace:RUL-20260101-old' }]),
     /different kind/,
   );
   assert.deepEqual([...io.files.keys()], [ruleSource]);
@@ -348,10 +347,10 @@ test('commit refuses to replace across kinds', async () => {
 test('commit rejects an unknown option and a target that is gone', async () => {
   const io = memoryIo({});
   const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
-  await assert.rejects(() => core.commitBatch(io, batch, [{ index: 0, key: 'nonsense' }]), /invalid choice/);
+  await assert.rejects(() => confirmedCommit(io, batch, [{ index: 0, key: 'nonsense' }]), /invalid choice/);
 
   batch.items[0].options.push({ key: 'replace:GONE', action: 'replace', targetId: 'GONE', label: 'x' });
-  await assert.rejects(() => core.commitBatch(io, batch, [{ index: 0, key: 'replace:GONE' }]), /gone or retired/);
+  await assert.rejects(() => confirmedCommit(io, batch, [{ index: 0, key: 'replace:GONE' }]), /gone or retired/);
 });
 
 // --- Deciding every item ---------------------------------------------------
@@ -363,7 +362,7 @@ test('a batch with no verdict at all is kept pending, not retired', async () => 
   const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
   await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
 
-  const result = await core.commitBatch(io, batch, []);
+  const result = await confirmedCommit(io, batch, []);
 
   assert.deepEqual(result.saved, []);
   assert.equal(result.skipped, 0);
@@ -379,7 +378,7 @@ test('an answer that matches no option keeps the batch pending', async () => {
   const { questions } = core.askToolArgs(batch);
 
   const { selections, notes } = core.selectionsFromAnswers(batch, questions, [['save everything please']]);
-  const result = await core.commitBatch(io, batch, selections);
+  const result = await confirmedCommit(io, batch, selections);
 
   assert.equal(notes.length, 1);
   assert.equal(result.saved.length, 0);
@@ -394,7 +393,7 @@ test('deciding every item, including "do not save", finishes the batch', async (
   const { questions } = core.askToolArgs(batch);
 
   const { selections } = core.selectionsFromAnswers(batch, questions, [[core.t('en', 'skip')]]);
-  const result = await core.commitBatch(io, batch, selections);
+  const result = await confirmedCommit(io, batch, selections);
 
   assert.equal(result.pending, 0);
   assert.equal(result.skipped, 1);
@@ -409,7 +408,7 @@ test('a partially decided batch saves what was chosen and keeps the rest', async
   ]);
   await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
 
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'create' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'create' }]);
 
   assert.equal(result.saved.length, 1);
   assert.equal(result.pending, 1);
@@ -426,7 +425,7 @@ test('a duplicate verdict is a decision, not a pending item', async () => {
   }]);
   await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
 
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'duplicate:LSN-20260101-old' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'duplicate:LSN-20260101-old' }]);
 
   assert.equal(result.pending, 0);
   assert.equal(result.skipped, 1);
@@ -441,14 +440,14 @@ test('a second round reports what an earlier round wrote, not "nothing"', async 
   ]);
   await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
 
-  const first = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), [{ index: 0, key: 'create' }]);
+  const first = await confirmedCommit(io, await core.readBatch(io, batch.id, 'en'), [{ index: 0, key: 'create' }]);
   assert.equal(first.saved.length, 1);
   assert.equal(first.pending, 1);
   assert.deepEqual(first.already, []);
 
   // The second round answers nothing: the host only returns what the user
   // touched, and the batch as re-read from disk carries no `savedAs`.
-  const second = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), []);
+  const second = await confirmedCommit(io, await core.readBatch(io, batch.id, 'en'), []);
 
   assert.deepEqual(second.saved, [], 'nothing is written twice');
   assert.deepEqual(second.already.map(entry => entry.id), [first.saved[0].id]);
@@ -468,8 +467,8 @@ test('an entry written by this round is reported as saved, not as already saved'
   const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
   const selections = [{ index: 0, key: 'create' }];
 
-  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
-  const replay = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+  const first = await confirmedCommit(io, JSON.parse(JSON.stringify(batch)), selections);
+  const replay = await confirmedCommit(io, JSON.parse(JSON.stringify(batch)), selections);
 
   assert.equal(replay.saved.length, 1);
   assert.equal(replay.saved[0].id, first.saved[0].id);
@@ -506,7 +505,7 @@ test('a retry after a failed inbox write-back does not duplicate entries', async
   });
   const selections = [{ index: 0, key: 'create' }, { index: 1, key: 'create' }];
 
-  await assert.rejects(() => core.commitBatch(io, onDisk, selections), BATCH_RE);
+  await assert.rejects(() => confirmedCommit(io, onDisk, selections), BATCH_RE);
 
   const landed = [...io.files.keys()].filter(path => path.startsWith(`${MEMORY}/`));
   assert.equal(landed.length, 1, 'the first entry should have landed before the failure');
@@ -515,7 +514,7 @@ test('a retry after a failed inbox write-back does not duplicate entries', async
 
   // Retry with the batch exactly as the failed run left it on disk.
   const retryIo = memoryIo(io.snapshot());
-  const result = await core.commitBatch(retryIo, JSON.parse(JSON.stringify(batch)), selections);
+  const result = await confirmedCommit(retryIo, JSON.parse(JSON.stringify(batch)), selections);
 
   const after = [...retryIo.files.keys()].filter(path => path.startsWith(`${MEMORY}/`));
   assert.equal(after.length, 2, 'the replayed entry must not be written a second time');
@@ -534,7 +533,7 @@ test('the partial-failure message reports the write-back problem too', async () 
     failWrite: source => (source.startsWith(`${INBOX}/`) ? true : (writes += 1) > 1),
   });
   await assert.rejects(
-    () => core.commitBatch(io, batch, [{ index: 0, key: 'create' }, { index: 1, key: 'create' }]),
+    () => confirmedCommit(io, batch, [{ index: 0, key: 'create' }, { index: 1, key: 'create' }]),
     /batch state could not be written back/,
   );
 });
@@ -542,10 +541,10 @@ test('the partial-failure message reports the write-back problem too', async () 
 test('a retry can be run twice without producing a third copy', async () => {
   const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
   const io = memoryIo({});
-  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), [{ index: 0, key: 'create' }]);
+  const first = await confirmedCommit(io, JSON.parse(JSON.stringify(batch)), [{ index: 0, key: 'create' }]);
 
   const replayIo = memoryIo(io.snapshot());
-  const second = await core.commitBatch(replayIo, JSON.parse(JSON.stringify(batch)), [{ index: 0, key: 'create' }]);
+  const second = await confirmedCommit(replayIo, JSON.parse(JSON.stringify(batch)), [{ index: 0, key: 'create' }]);
 
   assert.equal(second.saved[0].id, first.saved[0].id);
   assert.equal([...replayIo.files.keys()].filter(p => p.startsWith(`${MEMORY}/`)).length, 1);
@@ -560,11 +559,11 @@ test('a retry of a replace does not trip over the target it retired', async () =
   }]);
   const selections = [{ index: 0, key: 'replace:LSN-20260101-old' }];
 
-  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+  const first = await confirmedCommit(io, JSON.parse(JSON.stringify(batch)), selections);
   assert.equal(core.parseEntry(source, io.files.get(source)).status, 'deprecated', 'the first run retired the target');
 
   const retryIo = memoryIo(io.snapshot());
-  const second = await core.commitBatch(retryIo, JSON.parse(JSON.stringify(batch)), selections);
+  const second = await confirmedCommit(retryIo, JSON.parse(JSON.stringify(batch)), selections);
 
   assert.equal(second.saved[0].id, first.saved[0].id);
   assert.equal(second.pending, 0);
@@ -582,12 +581,12 @@ test('a retired target does not block the rest of the batch on a retry', async (
   ]);
   const selections = [{ index: 0, key: 'replace:LSN-20260101-old' }, { index: 1, key: 'create' }];
 
-  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+  const first = await confirmedCommit(io, JSON.parse(JSON.stringify(batch)), selections);
   assert.equal(first.saved.length, 2);
 
   // The inbox write-back failed, so the batch as re-read carries no `savedAs`.
   const retryIo = memoryIo(io.snapshot());
-  const second = await core.commitBatch(retryIo, JSON.parse(JSON.stringify(batch)), selections);
+  const second = await confirmedCommit(retryIo, JSON.parse(JSON.stringify(batch)), selections);
 
   assert.equal(second.saved.length, 2);
   assert.equal(second.pending, 0);
@@ -607,13 +606,13 @@ test('a retry repairs a back-link the first run could not write', async () => {
   }]);
   const selections = [{ index: 0, key: 'replace:LSN-20260101-old' }];
 
-  const first = await core.commitBatch(io, JSON.parse(JSON.stringify(batch)), selections);
+  const first = await confirmedCommit(io, JSON.parse(JSON.stringify(batch)), selections);
   assert.equal(first.saved.length, 1);
   assert.equal(first.warnings.length, 1, 'the back-link failure is reported, not swallowed');
   assert.equal(core.parseEntry(source, io.files.get(source)).status, 'active', 'still active: the link never landed');
 
   const retryIo = memoryIo(io.snapshot());
-  const second = await core.commitBatch(retryIo, JSON.parse(JSON.stringify(batch)), selections);
+  const second = await confirmedCommit(retryIo, JSON.parse(JSON.stringify(batch)), selections);
 
   assert.equal(second.warnings.length, 0);
   const old = core.parseEntry(source, retryIo.files.get(source));
@@ -627,7 +626,7 @@ test('a batch is retired by deletion when the io layer can delete', async () => 
   const io = memoryIo({});
   const batch = makeBatch([{ item: makeItem({ title: 'Alpha' }), similar: [] }]);
   await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
-  await core.commitBatch(io, batch, [{ index: 0, key: 'create' }]);
+  await confirmedCommit(io, batch, [{ index: 0, key: 'create' }]);
   assert.equal(io.files.has(core.batchPath(batch.id)), false);
 });
 
@@ -637,7 +636,7 @@ test('a batch is marked done when the io layer cannot delete', async () => {
   await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
   io.remove = async () => { throw new Error('the plugin process does not delete files'); };
 
-  await core.commitBatch(io, batch, [{ index: 0, key: 'create' }]);
+  await confirmedCommit(io, batch, [{ index: 0, key: 'create' }]);
   const stored = JSON.parse(io.files.get(core.batchPath(batch.id)));
   assert.equal(stored.status, 'done');
   assert.deepEqual(await core.listBatches(io), [], 'a handled batch is not listed again');
@@ -682,7 +681,7 @@ test('a commit that saves nothing reports it, undecided or decided', async () =>
   // Undecided: nothing is written and the batch stays pending.
   const io = memoryIo({});
   const batch = makeBatch([{ item: makeItem(), similar: [] }]);
-  const undecided = await core.commitBatch(io, batch, []);
+  const undecided = await confirmedCommit(io, batch, []);
   assert.deepEqual(undecided.saved, []);
   assert.equal(undecided.pending, 1);
   const undecidedText = core.describeResult(undecided, 'en').join('\n');
@@ -690,11 +689,11 @@ test('a commit that saves nothing reports it, undecided or decided', async () =>
   assert.match(undecidedText, /1 item still without your decision/);
 
   // Decided as "do not save".
-  const skipped = await core.commitBatch(io, batch, [{ index: 0, key: core.SKIP_KEY }]);
+  const skipped = await confirmedCommit(io, batch, [{ index: 0, key: core.SKIP_KEY }]);
   assert.deepEqual(skipped.saved, []);
   assert.equal(skipped.skipped, 1);
   assert.equal(skipped.pending, 0);
-  assert.equal(core.describeResult(skipped, 'en').join('\n'), 'Nothing was saved\n1 skipped');
+  assert.equal(core.describeResult(skipped, 'en').join('\n'), 'Nothing was saved\n1 explicitly rejected');
 
   // Decided as a duplicate of an existing entry.
   const dupIo = memoryIo({
@@ -702,7 +701,7 @@ test('a commit that saves nothing reports it, undecided or decided', async () =>
   });
   const similar = await core.loadCorpus(dupIo.reader);
   const dupBatch = makeBatch([{ item: makeItem(), similar }]);
-  const duplicate = await core.commitBatch(dupIo, dupBatch, [
+  const duplicate = await confirmedCommit(dupIo, dupBatch, [
     { index: 0, key: dupBatch.items[0].options.find(option => option.action === 'duplicate').key },
   ]);
   assert.deepEqual(duplicate.saved, []);

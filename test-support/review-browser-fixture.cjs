@@ -1,0 +1,20 @@
+'use strict';
+const fs=require('node:fs');const path=require('node:path');const root=path.resolve(__dirname,'..');
+const main=require(root+'/plugin/main.js');const core=require(root+'/plugin/core/index.js');
+const {memoryIo,mdFile,MEMORY}=require(root+'/test/helpers.js');
+(async()=>{
+ const io=memoryIo({[MEMORY+'/LSN-20260101-build.md']:mdFile('LSN-20260101-build',{title:'构建路径',body:'Linux 使用 /usr/local/sdk。\n检查 SDK_VERSION。',keywords:['构建','sdk']})});
+ globalThis.pi={workspace:{get:async()=>({name:'项目记忆测试夹具',path:'/fixture'})},app:{getLocale:async()=> 'zh-CN'},plugin:{getSettings:async()=>({})},fs:{list:io.reader.list,readText:io.readText,writeText:io.writeText,stat:async path=>{if(!await io.exists(path))throw Object.assign(new Error('missing'),{code:'NOT_FOUND'});return {};}}};
+ main._internals.setProjectIoFactory(()=>io);const context={sessionId:'phase4-browser-fixture',mode:'agent'};
+ const items=[{kind:'lesson',title:'构建路径',content:'Windows 使用 C:\\sdk。\n检查 SDK_VERSION。',keywords:['构建','sdk'],origin:'构建验证记录'}, {kind:'rule',title:'离线验证要求',content:'测试夹具使用离线环境验证。',keywords:['离线']}];
+ const p=await main._internals.prepare({items},context);
+ const common={reason:'经过验证的适用说明',same:'共同的 SDK_VERSION 检查',changes:'增加 Windows 路径',scope:'Windows 环境',evidence:['夹具说明；未运行实际设备']};
+ const proposed=await main._internals.propose({reviewToken:p.reviewToken,decisions:[{...common,index:0,action:'conflict',targetId:'LSN-20260101-build'},{...common,index:1,action:'create',targetId:null}]},context);
+ const response=await main.onPanelInvoke('inbox.list');
+ const tasks=require(root+'/plugin/tasks.js');
+ await tasks.updateTask(io,context.sessionId,{action:'begin',goal:'验证任务诊断与审批',operationId:'11111111-2222-3333-4444-555555555555'});
+ await tasks.updateTask(io,context.sessionId,{action:'checkpoint',phase:'validation',result:'covered',reason:'已有原文说明适用条件'});
+ const taskStatus=await main.onPanelInvoke('task.status');
+ fs.writeFileSync(process.env.PI_SCRATCH_DIR+'/phase4-browser-fixture.json',JSON.stringify({response,proposed,taskStatus},null,2));
+ console.log('Fixture: '+response.batches[0].items.length+' items, complete comparison available');
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -14,6 +14,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const core = require('../plugin/core/index.js');
+const { confirmedCommit } = require('./helpers.js');
 const ui = require('../plugin/views/ui.js');
 const extension = require('../plugin/extension.js');
 const { memoryIo, makeEntry, mdFile, MEMORY, INBOX } = require('./helpers.js');
@@ -105,7 +106,7 @@ test('a replace backlink refreshes updated on the retired entry', async () => {
     prepared: [{ item, similar: [core.parseEntry(source, io.files.get(source))] }],
     locale: 'en', id: 'KB-11111111-2222-3333-4444-555555555555',
   });
-  await core.commitBatch(io, batch, [{ index: 0, key: 'replace:LSN-20260101-old' }]);
+  await confirmedCommit(io, batch, [{ index: 0, key: 'replace:LSN-20260101-old' }]);
   const old = core.parseEntry(source, io.files.get(source));
   assert.equal(old.status, 'deprecated');
   assert.match(old.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);

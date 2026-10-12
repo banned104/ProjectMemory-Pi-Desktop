@@ -49,6 +49,7 @@ function usePi(overrides = {}) {
     ...overrides,
   };
   globalThis.pi = pi;
+  main._internals.setProjectIoFactory(() => state);
   return { state, calls };
 }
 
@@ -60,6 +61,9 @@ const pendingBatch = async (state, items = [{ kind: 'lesson', title: 'Alpha', co
     locale: 'en',
     id: BATCH_ID,
   });
+  batch.analysisState = 'analysed';
+  batch.items.forEach(item => { item.analysis = { action: 'create', targetId: null, reason: 'Test verified substance', same: 'No prior item', changes: 'New fact', scope: 'Test project', evidence: ['test'], compared: [], source: 'agent' }; });
+  main._internals.trustAnalysis(batch);
   await state.writeText(core.batchPath(batch.id), JSON.stringify(batch));
   return batch;
 };
@@ -68,24 +72,21 @@ const memoryFiles = state => [...state.files.keys()].filter(path => path.startsW
 
 // --- Agent tools -----------------------------------------------------------
 
-test('propose stores the batch and writes nothing to memory before the answer', async () => {
+test('legacy propose prepares comparison material and writes no files', async () => {
   const { state } = usePi();
   const result = await propose(
     { items: [{ kind: 'lesson', title: 'Alpha', content: 'detail', keywords: ['alpha'] }] },
     { sessionId: 's1' },
   );
 
-  assert.equal(result.status, 'awaiting-user-answer');
-  assert.match(result.batchId, /^KB-[0-9a-f-]{36}$/);
-  assert.equal(result.asktool.questions.length, 1);
-  // The marker is how the user's genuine answer is matched back to an item.
-  assert.match(result.asktool.questions[0].question, /\[PM [0-9a-f]{8} 1\/1\]/);
-  assert.ok(state.files.has(`${INBOX}/.gitignore`), 'pending batches are review state, not project memory');
-  assert.ok(state.files.has(core.batchPath(result.batchId)));
+  assert.equal(result.status, 'comparison-required');
+  assert.ok(result.reviewToken);
+  assert.equal(result.asktool, undefined);
+  assert.equal(state.files.size, 0);
   assert.deepEqual(memoryFiles(state), [], 'nothing reaches .workflow/memory until the user answers');
 
-  await assert.rejects(() => propose({ items: [] }), /non-empty array/);
-  await assert.rejects(() => propose({}), /non-empty array/);
+  await assert.rejects(() => propose({ items: [] }, { sessionId: 's1' }), /non-empty array/);
+  await assert.rejects(() => propose({}, { sessionId: 's1' }), /non-empty array/);
 });
 
 test('the search tool returns ids and hides retired entries', async () => {
@@ -145,7 +146,7 @@ test('the load tool returns the full text and warns about a retired entry', asyn
 });
 
 test('the tool contracts match what the core layer validates', () => {
-  assert.deepEqual(Object.keys(tools).sort(), ['load', 'propose', 'search']);
+  assert.deepEqual(Object.keys(tools).sort(), ['load', 'prepare', 'propose', 'search', 'task']);
   for (const [name, entry] of Object.entries(tools)) {
     assert.equal(entry.risk, 'low', `${name} must declare its risk`);
     assert.equal(entry.schema.type, 'object');
@@ -210,11 +211,12 @@ test('the panel lists, commits and then refuses to handle the batch again', asyn
   const committed = await main.onPanelInvoke('inbox.commit', {
     batchId: batch.id,
     selections: [{ index: 0, key: 'create' }],
+    reviewToken: listed.batches[0].reviewToken,
   });
   assert.equal(committed.saved.length, 1);
   assert.equal(memoryFiles(state).length, 1);
-  // The plugin process has no fs.delete permission, so the batch is marked done.
-  assert.equal(JSON.parse(state.files.get(core.batchPath(batch.id))).status, 'done');
+  // Both confirmation paths retire the handled inbox file under the shared lock.
+  assert.equal(state.files.has(core.batchPath(batch.id)), false);
 
   await assert.rejects(
     () => main.onPanelInvoke('inbox.commit', { batchId: batch.id, selections: [{ index: 0, key: 'create' }] }),
@@ -230,10 +232,11 @@ test('the panel discards a batch without writing memory', async () => {
     { kind: 'rule', title: 'Beta', content: 'detail', keywords: [] },
   ]);
 
-  const result = await main.onPanelInvoke('inbox.discard', { batchId: batch.id });
+  const reviewToken = (await main.onPanelInvoke('inbox.list')).batches[0].reviewToken;
+  const result = await main.onPanelInvoke('inbox.discard', { batchId: batch.id, reviewToken });
   assert.equal(result.discarded, 2);
   assert.deepEqual(memoryFiles(state), []);
-  assert.equal(JSON.parse(state.files.get(core.batchPath(batch.id))).status, 'done');
+  assert.equal(state.files.has(core.batchPath(batch.id)), false);
 
   await assert.rejects(
     () => main.onPanelInvoke('inbox.discard', { batchId: batch.id }),
@@ -251,7 +254,7 @@ test('the panel rejects malformed input and unknown channels', async () => {
   await assert.rejects(() => main.onPanelInvoke('inbox.discard', {}), /invalid batch id/);
   await assert.rejects(
     () => main.onPanelInvoke('inbox.commit', { batchId: BATCH_ID, selections: 'everything' }),
-    /selections must be an array/,
+    /approval is stale or missing/,
   );
   assert.deepEqual(memoryFiles(state), [], 'a rejected call writes nothing');
 
@@ -266,28 +269,29 @@ test('the panel refuses to commit the same batch twice at once', async () => {
   const { state } = usePi();
   const batch = await pendingBatch(state);
   const selections = [{ index: 0, key: 'create' }];
+  const reviewToken = (await main.onPanelInvoke('inbox.list')).batches[0].reviewToken;
 
   const settled = await Promise.allSettled([
-    commit({ batchId: batch.id, selections }),
-    commit({ batchId: batch.id, selections }),
+    commit({ batchId: batch.id, selections, reviewToken }),
+    commit({ batchId: batch.id, selections, reviewToken }),
   ]);
   assert.equal(settled.filter(entry => entry.status === 'fulfilled').length, 1, 'exactly one commit runs');
   const rejected = settled.find(entry => entry.status === 'rejected');
-  assert.match(rejected.reason.message, /already being processed/);
+  assert.match(rejected.reason.message, /already being processed|does not exist or was already handled/);
   assert.equal(memoryFiles(state).length, 1, 'the loser must not write a second entry');
 });
 
 // --- Lifecycle -------------------------------------------------------------
 
-test('onLoad registers the three tools and one command, onUnload removes them', async () => {
+test('onLoad registers the five tools and one command, onUnload removes them', async () => {
   const { calls } = usePi();
   await main.onLoad();
-  assert.deepEqual(calls.tools, [['register', 'search'], ['register', 'load'], ['register', 'propose']]);
+  assert.deepEqual(calls.tools, [['register', 'search'], ['register', 'load'], ['register', 'propose'], ['register', 'prepare'], ['register','task']]);
   assert.deepEqual(calls.commands, [['register', 'pi.project-memory.review']]);
 
   await main.onUnload();
-  assert.deepEqual(calls.tools.slice(3), [
-    ['unregister', 'search'], ['unregister', 'load'], ['unregister', 'propose'],
+  assert.deepEqual(calls.tools.slice(5), [
+    ['unregister', 'search'], ['unregister', 'load'], ['unregister', 'propose'], ['unregister', 'prepare'], ['unregister','task'],
   ]);
   assert.deepEqual(calls.commands.slice(1), [['unregister', 'pi.project-memory.review']]);
 });
@@ -402,12 +406,12 @@ test('memory.update refuses to write over a file that became a different entry',
     'kind: lesson', 'title: "Alpha"', 'keywords: []', 'status: active', 'created: 2026-09-21',
   ]));
 
-  const readText = globalThis.pi.fs.readText;
+  const readText = state.readText;
   let reads = 0;
-  globalThis.pi.fs.readText = async path => {
+  state.readText = async path => {
     const text = await readText(path);
     reads += 1;
-    return reads > 1 ? text.replace('LES-20260921-alpha', 'LES-20260921-zeta') : text;
+    return reads > 0 && path === source ? text.replace('LES-20260921-alpha', 'LES-20260921-zeta') : text;
   };
   await assert.rejects(
     () => main.onPanelInvoke('memory.update', { id: 'LES-20260921-alpha', patch: { title: 'Renamed' } }),

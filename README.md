@@ -4,31 +4,46 @@ PI-Desktop 插件「项目记忆」的重设计实现。**思路不变，实现�
 
 原插件：`axc00.project-knowledge` v0.3.3。
 
+当前版本 **0.3.0**：本地候选原文比较、版本绑定审批、完整差异与决定去重、有限自动正文及任务恢复。实际安装态验收尚未完成；安装包及校验值见 [`dist/README.md`](dist/README.md)。
+
 - 设计说明 → [`DESIGN.md`](DESIGN.md)
+- 分段改进计划 → [`docs/plans/2026-10-10-memory-workflow-improvement.md`](docs/plans/2026-10-10-memory-workflow-improvement.md)
+- 第三阶段工具链样例 → [`docs/usage/2026-10-11-memory-comparison.md`](docs/usage/2026-10-11-memory-comparison.md)
+- 第四阶段审批与验证 → [`docs/usage/2026-10-11-memory-review.md`](docs/usage/2026-10-11-memory-review.md)
+- 第五阶段任务与恢复 → [`docs/usage/2026-10-11-memory-lifecycle.md`](docs/usage/2026-10-11-memory-lifecycle.md)
+- 第六阶段联合验证与发布准备 → [`docs/usage/2026-10-11-release-readiness.md`](docs/usage/2026-10-11-release-readiness.md)
 - 插件本体 → [`plugin/`](plugin/)
 - 测试 → [`test/`](test/)
 - 打包产物 → `dist/pi.project-memory-<version>.piplug`
 
 ## 这是什么
 
-把「项目记忆」做成仓库里的普通 Markdown 文件，用关键词检索在每条消息上自动注入摘要，用「人在环」的卡片确认写入。
+把「项目记忆」做成仓库里的普通 Markdown 文件，用关键词检索在模型请求前提供有限的当前正文及任务索引，用「人在环」的卡片确认写入。
 
+```mermaid
+flowchart TD
+  A[项目 Markdown 正式记忆] --> B[请求前提供有限正文与版本]
+  B --> C[当前 Agent 判断适用性与任务结论]
+  C --> D[prepare 比较候选原文]
+  D --> E[用户批准具体变更]
+  E --> A
 ```
-记忆住在项目里（.workflow/memory/*.md）
-      ↓ 每条消息自动注入相关摘要（被动到达）
-      ↓ Agent 需要时按 ID 拉取全文（按需加载）
-      ↓ 任务结束时提出新经验 → 用户点确认 → 写回项目
-      ↓ 下一个 Agent 从第 1 步重新受益
-```
+
 
 ## 目录结构
 
 ```
 plugin/            会被打包进 .piplug 的内容
   manifest.json
-  main.js          插件进程：3 个工具 + 两个界面的后端 + 设置
+  main.js          插件进程：5 个工具 + 两个界面的后端 + 设置
   extension.js     agent 扩展：注入钩子 + 确认写入
   fs-guard.js      受限文件访问（独立可测）
+  comparison.js    会话内比较凭据、正文预算与建议校验
+  tasks.js         临时任务状态、检查与恢复
+  task-context.js  当前正式正文与上下文预算
+  review.js        完整审批展示与有上限的行级差异
+  approval.js      展示版本与批次恢复
+  write-coordinator.js  项目级写入票据
   core/
     index.js       统一导出
     text.js        归一化 / 截断 / 净化 / frontmatter
@@ -37,7 +52,9 @@ plugin/            会被打包进 .piplug 的内容
     batch.js       批次 / 卡片 / 确认 / 提交
     i18n.js        中英文案
     memory.js      视图的卡片模型 / 统计 / 编辑校验 / 删除目标校验
-  renderer/index.html   确认面板（待确认批次）
+  renderer/index.html   确认面板外壳
+  renderer/ui.js        审批渲染 / 双语文本
+  renderer/app.js       明确决定 / 编辑草稿 / 焦点
   views/
     index.html     项目记忆视图：外壳与样式（自包含）
     ui.js          纯渲染与筛选，所有转义规则在这里

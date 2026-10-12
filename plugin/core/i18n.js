@@ -23,6 +23,11 @@ const MESSAGES = {
     duplicate: id => `与 ${id} 重复：不保存`,
     conflict: id => `与 ${id} 各自成立：保存并互相关联`,
     skip: '不保存',
+    defer: '暂缓：保留待审',
+    deferred: n => `暂缓 ${n} 条，仍可继续审查`,
+    rejected: n => `明确不保存 ${n} 条`,
+    duplicates: n => `重复 ${n} 条，未写入`,
+    reviewExcerpt: (id,old,next,changes,scope,evidence) => `比较目标：${id}\n旧正文片段：${old}\n新正文片段：${next}\n变化：${changes}\n适用范围：${scope}\n依据：${evidence}\n片段已限长；完整差异、修改及其他动作请打开确认面板。`,
     mapUpdate: id => `更新项目地图（覆盖 ${id}）`,
 
     noteDuplicate: '与已有条目正文相同',
@@ -47,6 +52,7 @@ const MESSAGES = {
     targetGone: (title, id) => `${title} 的目标条目 ${id} 已不存在或已失效`,
     kindMismatch: id => `${id} 的类型与本次建议不同，不能替代`,
     oneReplacement: id => `同一次提交中 ${id} 只能被替代一次`,
+    mapLayout: '项目地图数据异常：发现退役、异位、重复地图或 MAP.md 被占用；请先检查现有文件，未自动覆盖或迁移',
 
     unanswered: title => `未作答：${title}`,
     notAnOption: (title, answer, offered) => `${title} 的答案「${answer}」不是卡片上的选项；可选：${offered}（请重新作答）`,
@@ -75,6 +81,11 @@ const MESSAGES = {
     duplicate: id => `Duplicate of ${id}: save nothing`,
     conflict: id => `Both hold alongside ${id}: save and link the two`,
     skip: 'Do not save',
+    defer: 'Defer: keep pending',
+    deferred: n => `${n} deferred; review can continue`,
+    rejected: n => `${n} explicitly rejected`,
+    duplicates: n => `${n} duplicates; nothing written`,
+    reviewExcerpt: (id,old,next,changes,scope,evidence) => `Compared target: ${id}\nOld excerpt: ${old}\nNew excerpt: ${next}\nChanges: ${changes}\nScope: ${scope}\nEvidence: ${evidence}\nExcerpts are bounded; use the review panel for complete differences, edits and alternatives.`,
     mapUpdate: id => `Update the project map (overwrites ${id})`,
 
     noteDuplicate: 'same body as an existing entry',
@@ -99,6 +110,7 @@ const MESSAGES = {
     targetGone: (title, id) => `${title} points at ${id}, which is gone or retired`,
     kindMismatch: id => `${id} is a different kind and cannot be replaced by this item`,
     oneReplacement: id => `${id} can only be replaced once per commit`,
+    mapLayout: 'invalid project map layout: retired, misplaced or duplicate map, or MAP.md is occupied; inspect existing files first, no automatic overwrite or migration',
 
     unanswered: title => `unanswered: ${title}`,
     notAnOption: (title, answer, offered) => `the answer "${answer}" for ${title} is not one of the card's options; available: ${offered} (answer again with one of them)`,

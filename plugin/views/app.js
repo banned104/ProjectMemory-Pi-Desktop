@@ -161,6 +161,7 @@
       keywords: String(data.get('keywords') ?? '').split(',').map(value => value.trim()).filter(Boolean),
       pinned: pinned ? pinned.checked : state.editing.pinned,
       body: String(data.get('body') ?? state.editing.body ?? ''),
+      origin:String(data.get('origin')??state.editing.origin??''),scope:String(data.get('scope')??state.editing.scope??''),
     };
   }
 
@@ -251,7 +252,7 @@
   async function openEditor(card) {
     try {
       const loaded = await call('memory.get', { id: card.id });
-      state.editing = { ...loaded.card, body: loaded.body };
+      state.editing = { ...loaded.card, body: loaded.body, baseHash: loaded.baseHash };
       state.pendingDelete = null;
       render();
       const form = el.grid.querySelector('.pm-form');
@@ -265,7 +266,7 @@
   async function applyPatch(card, patch, message) {
     state.busy = true;
     try {
-      const result = await call('memory.update', { id: card.id, patch });
+      const result = await call('memory.update', { id: card.id, patch, ...((state.editing?.id === card.id ? state.editing.baseHash : card.baseHash) ? { baseHash: state.editing?.id === card.id ? state.editing.baseHash : card.baseHash } : {}) });
       if (state.editing && state.editing.id === card.id) state.editing = null;
       replaceCard(result.card);
       render();
@@ -342,7 +343,7 @@
     if (!card) { render(); return; }
     state.busy = true;
     try {
-      await call('memory.delete', { id: card.id });
+      await call('memory.delete', { id: card.id, ...(card.baseHash ? { baseHash: card.baseHash } : {}) });
       state.cards = state.cards.filter(candidate => candidate.id !== card.id);
       if (state.editing && state.editing.id === card.id) state.editing = null;
       render();
@@ -416,6 +417,7 @@
       keywords: String(data.get('keywords') ?? '').split(',').map(value => value.trim()).filter(Boolean),
       pinned: pinned ? pinned.checked : card.pinned,
       body: String(data.get('body') ?? ''),
+      origin:String(data.get('origin')??card.origin??''),scope:String(data.get('scope')??card.scope??''),
     }, label('saved'));
   });
 

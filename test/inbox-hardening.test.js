@@ -9,10 +9,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const core = require('../plugin/core/index.js');
+const { confirmedCommit } = require('./helpers.js');
 const extension = require('../plugin/extension.js');
 const { memoryIo, mdFile, MEMORY, INBOX } = require('./helpers.js');
 
-const { onToolResult } = extension._internals;
+const { answeredCall: onToolResult } = require('./helpers.js');
 
 const BATCH_ID = 'KB-11111111-2222-3333-4444-555555555555';
 
@@ -49,16 +50,16 @@ test('a skip verdict survives a partial round and counts as skipped, not pending
   ]);
   await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
 
-  const first = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), [{ index: 0, key: 'skip' }]);
+  const first = await confirmedCommit(io, await core.readBatch(io, batch.id, 'en'), [{ index: 0, key: 'skip' }]);
   assert.equal(first.skipped, 0 + 1);
   assert.equal(first.pending, 1);
 
-  const second = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), []);
+  const second = await confirmedCommit(io, await core.readBatch(io, batch.id, 'en'), []);
   assert.equal(second.saved.length, 0);
   assert.equal(second.skipped, 1, 'the earlier skip is remembered');
   assert.equal(second.pending, 1, 'only the undecided item waits');
 
-  const third = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), [{ index: 1, key: 'create' }]);
+  const third = await confirmedCommit(io, await core.readBatch(io, batch.id, 'en'), [{ index: 1, key: 'create' }]);
   assert.equal(third.saved.length, 1);
   assert.equal(third.skipped, 1);
   assert.equal(third.pending, 0);
@@ -73,13 +74,13 @@ test('an entry saved by an earlier round counts as already saved on retry, even 
   ]);
   await io.writeText(core.batchPath(batch.id), JSON.stringify(batch));
 
-  const first = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), [{ index: 0, key: 'create' }]);
+  const first = await confirmedCommit(io, await core.readBatch(io, batch.id, 'en'), [{ index: 0, key: 'create' }]);
   assert.equal(first.saved.length, 1);
 
   // The landed file is deleted out from under the batch: the persisted
   // `savedAs` mark is what keeps the retry honest.
   io.files.delete(first.saved[0].source);
-  const second = await core.commitBatch(io, await core.readBatch(io, batch.id, 'en'), []);
+  const second = await confirmedCommit(io, await core.readBatch(io, batch.id, 'en'), []);
   assert.deepEqual(second.already.map(entry => entry.id), [first.saved[0].id]);
   assert.equal(second.skipped, 0, 'a saved entry is never reported as skipped');
   assert.equal(second.pending, 1);
@@ -100,7 +101,7 @@ test('commitBatch refuses a batch whose envelope was rewritten on disk', async (
   ]) {
     const tampered = JSON.parse(JSON.stringify(good));
     mutate(tampered);
-    await assert.rejects(() => core.commitBatch(io, tampered, []), /batch|invalid/i);
+    await assert.rejects(() => confirmedCommit(io, tampered, []), /batch|invalid/i);
   }
 });
 
@@ -168,7 +169,7 @@ test('a backlink is refused when the target file became a different entry', asyn
   io.reader.read = swapping;
   io.readText = swapping;
 
-  const result = await core.commitBatch(io, batch, [{ index: 0, key: 'replace:LSN-20260101-old' }]);
+  const result = await confirmedCommit(io, batch, [{ index: 0, key: 'replace:LSN-20260101-old' }]);
   assert.equal(result.saved.length, 1);
   assert.equal(result.warnings.length, 1);
   assert.match(result.warnings[0], /target changed on disk/);

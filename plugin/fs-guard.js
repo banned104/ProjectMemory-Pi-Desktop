@@ -63,6 +63,7 @@ const inside = (base, target) => target === base || target.startsWith(`${base}${
 function createProjectFs(root, sessionId, options = {}) {
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const writablePrefixes = options.writable ?? DEFAULT_WRITABLE;
+  const removablePrefixes = options.removable ?? writablePrefixes;
 
   /** session + cwd -> { real, dev, ino }, fixed at session start or first use. */
   const anchors = new Map();
@@ -131,7 +132,7 @@ function createProjectFs(root, sessionId, options = {}) {
     : stat.nlink > 1 ? hardLinkError(rel)
       : stat.size > maxFileBytes ? tooLargeError(rel, maxFileBytes) : null);
 
-  async function list(rel) {
+  async function list(rel, strict = false) {
     const anchor = await base();
     const parts = partsOf(rel);
     await assertNoLinks(anchor, parts, rel);
@@ -140,15 +141,17 @@ function createProjectFs(root, sessionId, options = {}) {
     const dirents = await fsp.readdir(full, { withFileTypes: true });
     const listed = [];
     for (const entry of dirents) {
-      if (entry.isSymbolicLink()) continue;
+      if (entry.isSymbolicLink()) { if (strict) throw linkError(rel); continue; }
       if (entry.isDirectory()) {
         listed.push({ name: entry.name, path: `${rel}/${entry.name}`, isDirectory: true, size: 0 });
         continue;
       }
-      if (!entry.isFile()) continue;
+      if (!entry.isFile()) { if (strict) throw notFileError(rel); continue; }
       let stat;
       try { stat = await fsp.lstat(path.join(full, entry.name)); } catch { continue; }
-      if (!fileProblem(stat, rel)) {
+      const problem = fileProblem(stat, rel);
+      if (strict && problem) throw problem;
+      if (!problem) {
         listed.push({ name: entry.name, path: `${rel}/${entry.name}`, isDirectory: false, size: stat.size });
       }
     }
@@ -208,6 +211,7 @@ function createProjectFs(root, sessionId, options = {}) {
     );
     try {
       await handle.writeFile(content, 'utf8');
+      await handle.sync();
       // The directory must still be the one we checked, and the temp file ours.
       await assertCanonical(anchor, dir, rel);
       const [opened, named] = await Promise.all([handle.stat(), fsp.lstat(temp)]);
@@ -227,7 +231,18 @@ function createProjectFs(root, sessionId, options = {}) {
       await fsp.rm(temp, { force: true });
       throw error;
     }
-    await fsp.rename(temp, full);
+    try {
+      for (let attempt = 0; ; attempt += 1) {
+        try { await fsp.rename(temp, full); break; }
+        catch (error) {
+          if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 40) throw error;
+          await new Promise(resolve => setTimeout(resolve, 10));
+          await base();
+          await assertNoLinks(anchor, parts, rel, { missingOk: true });
+          await assertCanonical(anchor, dir, rel);
+        }
+      }
+    } catch (error) { await fsp.rm(temp, { force: true }); throw error; }
 
     const landed = await fsp.realpath(full);
     if (landed !== full) { await fsp.rm(full, { force: true }); throw linkError(rel); }
@@ -236,7 +251,41 @@ function createProjectFs(root, sessionId, options = {}) {
     catch (error) { await fsp.rm(full, { force: true }); throw error; }
   }
 
-   async function exists(rel) {
+  /** O_EXCL reserves the final name; a caller never checks then overwrites. */
+  async function createExclusive(rel, content) {
+    const anchor = await base();
+    const parts = writableParts(rel);
+    const dirParts = parts.slice(0, -1);
+    await assertNoLinks(anchor, parts, rel, { missingOk: true });
+    const dir = path.join(anchor, ...dirParts);
+    await fsp.mkdir(dir, { recursive: true });
+    await assertNoLinks(anchor, dirParts, rel);
+    await assertCanonical(anchor, dir, rel);
+    const full = path.join(dir, parts.at(-1));
+    const handle = await fsp.open(full, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | O_NOFOLLOW, 0o600);
+    try {
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+      const [opened, named] = await Promise.all([handle.stat(), fsp.lstat(full)]);
+      if (opened.dev !== named.dev || opened.ino !== named.ino) throw linkError(rel);
+      await assertCanonical(anchor, dir, rel);
+      await base();
+    } catch (error) {
+      // Remove only this opened inode, and only while the pinned directory is valid.
+      try {
+        await base();
+        await assertCanonical(anchor, dir, rel);
+        const [opened, named] = await Promise.all([handle.stat(), fsp.lstat(full)]);
+        if (opened.dev === named.dev && opened.ino === named.ino) {
+          await handle.close();
+          await fsp.unlink(full);
+        }
+      } catch { /* refuse unsafe cleanup; the caller receives the original error */ }
+      throw error;
+    } finally { await handle.close(); }
+  }
+
+    async function exists(rel) {
      const anchor = await base();
      return assertNoLinks(anchor, partsOf(rel), rel, { missingOk: true });
    }
@@ -244,6 +293,7 @@ function createProjectFs(root, sessionId, options = {}) {
    async function remove(rel) {
      const anchor = await base();
      const parts = writableParts(rel);
+     if (!removablePrefixes.some(prefix => rel.startsWith(prefix))) throw notWritable(rel);
      await assertNoLinks(anchor, parts, rel);
      await assertCanonical(anchor, path.join(anchor, ...parts.slice(0, -1)), rel);
      const full = path.join(anchor, ...parts);
@@ -252,11 +302,22 @@ function createProjectFs(root, sessionId, options = {}) {
      catch (error) { throw error; }
      if (st.isSymbolicLink()) throw linkError(rel);
      if (!st.isFile()) throw notFileError(rel);
-     await fsp.unlink(full);
+     if (st.nlink > 1) throw hardLinkError(rel);
+     for (let attempt = 0; ; attempt += 1) {
+       try { await fsp.unlink(full); break; }
+       catch (error) {
+         if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 40) throw error;
+         await new Promise(resolve => setTimeout(resolve, 10));
+         await base();
+         await assertNoLinks(anchor, parts, rel);
+         const current = await fsp.lstat(full);
+         if (current.dev !== st.dev || current.ino !== st.ino) throw linkError(rel);
+       }
+     }
      await base(); // the root must not have moved while removing
    }
 
-  return { reader: { list, read }, readText: read, writeText, exists, remove };
+  return { reader: { list, read }, listStrict: rel => list(rel, true), readText: read, writeText, createExclusive, exists, remove };
 }
 
 module.exports = { createProjectFs, DEFAULT_WRITABLE, DEFAULT_MAX_FILE_BYTES };

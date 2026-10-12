@@ -10,7 +10,9 @@ const core = require('../plugin/core/index.js');
 const extension = require('../plugin/extension.js');
 const { memoryIo, mdFile, MEMORY, INBOX } = require('./helpers.js');
 
-const { promptTurns, turnKeys, onProviderRequest, onBeforeAgentStart, onToolResult, retrieve, nodeIo, injections, cardLocaleOf } = extension._internals;
+const { promptTurns, turnKeys, onProviderRequest, onBeforeAgentStart, retrieve, nodeIo, injections, cardLocaleOf } = extension._internals;
+
+const { answeredCall: onToolResult } = require('./helpers.js');
 
 const BATCH_ID = 'KB-11111111-2222-3333-4444-555555555555';
 const CWD = '/project';
@@ -368,10 +370,10 @@ test('a project root replaced mid-session is refused, not adopted', async t => {
 
 // --- The extension entry point --------------------------------------------
 
-test('the factory registers exactly the four hooks it needs', () => {
+test('the factory registers supported retrieval, approval and task lifecycle hooks', () => {
   const registered = [];
   extension({ on: (event) => registered.push(event) });
-  assert.deepEqual(registered, ['session_start', 'before_provider_request', 'before_agent_start', 'tool_result']);
+  assert.deepEqual(registered, ['session_start', 'before_provider_request', 'before_agent_start', 'tool_call', 'tool_result','session_before_compact','session_compact','session_compact_failed','agent_end','agent_settled','turn_end','session_shutdown']);
 });
 
 test('cardLocaleOf reads the language off the question itself', () => {

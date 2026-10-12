@@ -91,6 +91,7 @@ function usePi(overrides = {}) {
     ...overrides,
   };
   globalThis.pi = pi;
+  main._internals.setProjectIoFactory(() => state);
   return { state };
 }
 
@@ -135,24 +136,19 @@ test('memory.import rejects pasted text with nothing reusable', async () => {
   const { state } = usePi();
   await assert.rejects(() => main.onPanelInvoke('memory.import', { markdown: '   ' }), /nothing to import/);
   await assert.rejects(() => main.onPanelInvoke('memory.import', {}), /nothing to import/);
-  assert.deepEqual(await main.onPanelInvoke('inbox.list'), { project: { name: 'Project', path: '/project' }, batches: [] });
+  assert.deepEqual(await main.onPanelInvoke('inbox.list'), { project: { name: 'Project', path: '/project' }, batches: [],history:[],warnings:[] });
 });
 
-test('an imported batch commits under a fresh id, not the source one', async () => {
+test('an imported batch stays unanalysed and cannot be directly committed', async () => {
   const { state } = usePi();
   await seedEntry(state);
   const pasted = state.files.get(`${MEMORY}/LSN-20260101-alpha.md`);
   const imported = await main.onPanelInvoke('memory.import', { markdown: pasted });
 
-  const committed = await main.onPanelInvoke('inbox.commit', {
-    batchId: imported.batchId,
-    selections: [{ index: 0, key: 'create' }],
-  });
-  assert.equal(committed.saved.length, 1);
-  assert.notEqual(committed.saved[0].id, 'LSN-20260101-alpha');
-  const entry = core.parseEntry(committed.saved[0].source, state.files.get(committed.saved[0].source));
-  assert.equal(entry.batchRef, imported.ref);
-  assert.equal(entry.supersededBy, null, 'cross-project links do not travel');
+  const shown = (await main.onPanelInvoke('inbox.list')).batches.find(b => b.id === imported.batchId);
+  assert.equal(shown.analysisState, 'unanalysed');
+  await assert.rejects(() => main.onPanelInvoke('inbox.commit', { batchId: imported.batchId, selections: [{ index: 0, key: 'create' }], reviewToken: shown.reviewToken }), e => e.code === 'E_COMPARE_INCOMPLETE');
+  assert.equal([...state.files.keys()].filter(path => path.startsWith(MEMORY + '/')).length, 1);
 });
 
 // --- view markup -------------------------------------------------------------------
